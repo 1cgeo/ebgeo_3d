@@ -248,6 +248,25 @@ node scripts/remedir.js silo-dona-francisca
 O roteiro imprime a distância entre o ponto do catálogo e o medido. Acima de 50 m
 ele marca `DESLOCADO`.
 
+## Teto de resolução de textura
+
+`--max-textura 512` reduz o lado maior de toda textura acima do teto, mantendo a
+proporção. Ele vem DESLIGADO.
+
+Ligue só com decisão do chefe, porque a troca aparece. Medido no Silo Oreste
+Ceretta, do DJI Terra:
+
+| | disco | conversão | VRAM de perto |
+|---|---|---|---|
+| sem teto | 338,4 MiB | 245,4 s | 45,0 MiB |
+| `--max-textura 512` | 214,5 MiB | 118,2 s | 31,1 MiB |
+
+O tempo de carga no cliente **não muda**. O teto compra disco e VRAM, e não
+velocidade. E de perto ele amacia a telha do galpão. Ver `docs/desempenho.md`.
+
+Vale só para o DJI Terra, que exporta 1024×1024. O Metashape exporta 256 a 512, e
+ali o teto não faz nada.
+
 ## Modelo que flutua
 
 O sintoma é o modelo pairando sobre um chão liso. A causa quase nunca é o modelo.

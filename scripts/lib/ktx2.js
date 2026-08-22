@@ -66,6 +66,45 @@ export function fecharTemporario(dir) {
 }
 
 /**
+ * Dimensao final de uma textura, depois do teto e do alinhamento de bloco.
+ *
+ * DUAS REGRAS, NESTA ORDEM.
+ *
+ * 1. TETO DE RESOLUCAO. Reduz o LADO MAIOR ate `maxTextura`, mantendo a
+ *    proporcao: uma 1024x512 com teto 512 vira 512x256, e a UV do tile continua
+ *    valendo. `maxTextura` 0 desliga.
+ *
+ *    O teto existe porque o excesso e da ORIGEM, e nao do acervo. O DJI Terra
+ *    exporta 1024x1024 e o Metashape 256 a 512. Medido no Silo: as texturas
+ *    acima de 512x512 sao 67,8% dos bytes de textura e 77,5% da VRAM de
+ *    textura; na Ponte de Quatis, do Metashape, sao 0%.
+ *
+ * 2. ALINHAMENTO DE BLOCO. ETC1S trabalha em blocos de 4x4. Dimensao que nao e
+ *    multipla de 4 faz o codificador preencher a borda por conta propria, e o
+ *    preenchimento sangra para dentro do tile vizinho na costura. Cortar para o
+ *    multiplo de 4 abaixo perde no maximo 3 pixels de uma borda que a UV do tile
+ *    ja nao usa.
+ *
+ * @param {number} largura
+ * @param {number} altura
+ * @param {number} [maxTextura] - teto do lado maior, em pixels; 0 desliga
+ * @returns {{largura:number, altura:number}}
+ */
+export function dimensaoAlvo(largura, altura, maxTextura = 0) {
+  let l = largura;
+  let a = altura;
+  if (maxTextura > 0 && Math.max(l, a) > maxTextura) {
+    const fator = maxTextura / Math.max(l, a);
+    l = Math.max(4, Math.round(l * fator));
+    a = Math.max(4, Math.round(a * fator));
+  }
+  return {
+    largura: Math.max(4, l - (l % 4)),
+    altura: Math.max(4, a - (a % 4)),
+  };
+}
+
+/**
  * Codifica uma imagem em KTX2/ETC1S com mipmaps.
  *
  * @param {Buffer} imagem - JPEG, PNG ou WebP embutido no glTF
@@ -73,19 +112,15 @@ export function fecharTemporario(dir) {
  * @param {string} opcoes.tmp - Diretorio temporario do worker
  * @param {number} opcoes.seq - Sequencial, para nomes nao colidirem no diretorio
  * @param {number} [opcoes.qlevel]
+ * @param {number} [opcoes.maxTextura] - teto do lado maior, em pixels; 0 desliga
  * @returns {Promise<Buffer|null>} O KTX2, ou null se o codificador recusou
  */
-export async function paraKTX2(imagem, { tmp, seq, qlevel = QLEVEL_PADRAO }) {
+export async function paraKTX2(imagem, { tmp, seq, qlevel = QLEVEL_PADRAO, maxTextura = 0 }) {
   const png = join(tmp, `t${seq}.png`);
   const ktx = join(tmp, `t${seq}.ktx2`);
 
-  // ETC1S trabalha em blocos de 4x4. Dimensao que nao e multipla de 4 faz o
-  // codificador preencher a borda por conta propria, e o preenchimento sangra
-  // para dentro do tile vizinho na costura. Cortar para o multiplo de 4 abaixo
-  // perde no maximo 3 pixels de uma borda que a UV do tile ja nao usa.
   const meta = await sharp(imagem).metadata();
-  const largura = Math.max(4, meta.width - (meta.width % 4));
-  const altura = Math.max(4, meta.height - (meta.height % 4));
+  const { largura, altura } = dimensaoAlvo(meta.width, meta.height, maxTextura);
 
   await sharp(imagem)
     .resize(largura, altura, { fit: 'fill' })

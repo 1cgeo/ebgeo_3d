@@ -16,3 +16,12 @@ data/
 # Saidas de trabalho da importacao
 tmp/
 *.3tz
+
+# Capturas da bancada de cliente. As cinco que docs/desempenho.md CITA como
+# prova ficam versionadas; toda captura nova de trabalho, nao.
+bench/capturas/*
+!bench/capturas/silo-sse16.jpg
+!bench/capturas/silo-sse32.jpg
+!bench/capturas/silo-sem-skiplod.jpg
+!bench/capturas/silo-tex512-perto.jpg
+!bench/capturas/silo-tex1024-perto.jpg

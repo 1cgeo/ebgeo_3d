@@ -59,6 +59,39 @@ export const ESCALA_GE = {
   'DJI Terra': 16,
 };
 
+/**
+ * Teto de resolucao de textura por motor de geracao, em pixels do lado maior.
+ *
+ * O DJI TERRA EXPORTA TEXTURA 1024x1024, e o Metashape 256 a 512. Medido em
+ * 2026-08-22 nos dois modelos publicados, com amostra de 250 tiles cada:
+ *
+ *                      bytes de textura   VRAM de textura
+ *   Silo (DJI Terra)      67,8% em 1024x1024   77,5%
+ *   Ponte (Metashape)      0,0%                 0,0%
+ *
+ * E no acervo inteiro (114 modelos, amostra de 11.261 tiles): 10,7% dos pixels
+ * passam de 512x512, concentrados em 7 modelos do DJI, que somam 11,2 GiB. Nos
+ * modelos do Metashape a fatia fica abaixo de 22%, quase sempre abaixo de 14%.
+ *
+ * O teto e por MOTOR, e nao global, pela mesma razao da escala do
+ * geometricError: e a origem que produz o excesso, e nao o acervo.
+ *
+ * ELE VEM DESLIGADO, E ISSO E DELIBERADO. Diferente da escala do
+ * geometricError, que corrige um defeito da origem sem custo, o teto TROCA
+ * qualidade por tamanho, e a troca aparece. Medido no Silo, com a camera a
+ * cerca de 157 m:
+ *
+ *   1024 (hoje)   338,4 MiB em disco   35,8 MiB de VRAM   conversao 245,4 s
+ *    512          214,5 MiB (-37%)     27,3 MiB (-24%)    conversao 118,2 s
+ *
+ * De longe as duas sao indistinguiveis. De perto o 512 amacia a telha do galpao
+ * e apaga a divisao dos paineis solares. Quem decide essa troca e o chefe, e nao
+ * o padrao do roteiro: ligue com `--max-textura 512`.
+ */
+export const MAX_TEXTURA = {
+  // 'DJI Terra': 512,
+};
+
 /** Acima disto o valor e o "sempre refine" do DJI, e nao um erro de verdade. */
 const GE_ABSURDO = 1e9;
 

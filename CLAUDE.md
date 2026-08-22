@@ -157,6 +157,22 @@ que custou trabalho.
   `node scripts/catalogo.js --js --sem-terreno` gera o config com
   `heightOffset = -ground_height`. NUNCA gere o config de produção com essa
   opção, e nunca ajuste a altura no olho.
+- **Medir no navegador com `requestAnimationFrame` não funciona.** Numa aba que
+  o Chrome considera `hidden` o rAF **não dispara nenhum quadro**, e o
+  `setTimeout` cai para cerca de um por segundo. Foi assim que a mesma variante
+  mediu 19,7 s e 83,6 s. O agendador que escapa é o `MessageChannel`: 107.599
+  ticks por segundo na mesma aba oculta. A `bench/cesium.html` usa ele, chama
+  `scene.render()` na mão e reprova a própria medida se a cadência passar de
+  5 ms.
+- **`Page.captureScreenshot` do CDP também estoura com a aba oculta.** O
+  framebuffer do WebGL existe: `canvas.toDataURL` o lê, desde que o Viewer suba
+  com `preserveDrawingBuffer: true`. A bancada faz POST da imagem para
+  `bench/capturas/`. Contagem de tile diz quanto custou, e só a imagem diz se
+  ficou bom.
+- **`viewBoundingSphere` e `flyToBoundingSphere` AGENDAM o movimento.** Num laço
+  de render manual a câmera nunca chega: medido, dão 3 tiles, 0 triângulo e tela
+  preta. Use `camera.setView` com a posição calculada, e ortogonalize o `up`
+  contra a `direction`, senão o Cesium gira a cena.
 - **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
   o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
   No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e

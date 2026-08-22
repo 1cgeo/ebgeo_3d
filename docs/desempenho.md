@@ -93,7 +93,7 @@ LOD grosso e quase não pesam: 39,4% dos tiles carregam 10,3% dos bytes. Os que
 carregam o peso estão em 50 a 200 KiB, que é a faixa que o time do CesiumJS
 recomenda. O desenho está certo, e agrupar tiles não é a otimização a perseguir.
 
-## As opções do CesiumJS são a terceira camada, e a mais mal medida
+## O CesiumJS, a terceira camada
 
 O `ebgeo_web` não usa os defaults do Cesium. O `map_3d.js:createOptimizedTileset`
 liga quinze opções, e **nenhuma delas tinha medida**:
@@ -135,54 +135,126 @@ há decisão medida atrás de cada linha, e o que difere de verdade se esconde n
 meio. **As onze linhas iguais ao default podem sair**, e as quatro que restam
 ficam visíveis.
 
-### O `skipLevelOfDetail` está ajudando
+### O instrumento, consertado em 2026-08-22
 
-Medido no Silo, mesma câmera, SSE 16:
+Nada abaixo valeria sem isto. A bancada antiga mediu a MESMA variante em 19,7 s
+e em 83,6 s. A causa ficou provada: numa aba que o Chrome considera `hidden`, o
+`requestAnimationFrame` **não dispara nenhum quadro**. Um laço que espera um
+segundo de rAF ali nunca termina, e o CDP estoura em 45 s. E `setTimeout` não
+salva: numa aba oculta ele cai para cerca de um disparo por segundo.
 
-| conjunto | tiles | triângulos | VRAM |
+O agendador que escapa dos dois é o `MessageChannel`. Medido na mesma aba
+oculta: **107.599 ticks em um segundo, contra zero quadros de rAF**. Com ele a
+`bench/cesium.html` chama `scene.render()` explicitamente.
+
+Reprodutibilidade depois do conserto, mesmo caso cinco vezes seguidas:
+1637, 1145, 1070, 1095, 1057 ms. A primeira é o aquecimento, e as outras variam 8%.
+
+A bancada **reprova a si mesma**: se a cadência ociosa do agendador passar de
+5 ms, a medida sai marcada INVALIDA e não entra no resumo.
+
+E ela captura a tela sozinha. `Page.captureScreenshot` do CDP também estoura com
+a aba oculta, mas o framebuffer do WebGL existe: `canvas.toDataURL` o lê, desde
+que o Viewer suba com `preserveDrawingBuffer`. As imagens vão para
+`bench/capturas/`. **A contagem de tile diz quanto custou, e só a imagem diz se
+ficou bom.**
+
+```bash
+EBGEO3D_CESIUM_DIR=<ebgeo_web>/public/vendors/cesium npm run bench:cliente
+# depois, no console da pagina:
+#   compara([{rotulo, modelo, extras, dist, pitch, frio, req}], rodadas)
+#   mostra(modelo, extras, dist, pitch, nomeDaCaptura)
+```
+
+`dist` é MULTIPLICADOR do raio medido do modelo, e não metros: o mesmo caso
+enquadra igual em modelos de tamanhos diferentes.
+
+### O `skipLevelOfDetail` está ajudando, e a imagem é a mesma
+
+Medido com o instrumento novo, 3 rodadas intercaladas, SSE 16, `dist` 0,9:
+
+| modelo | conjunto | tiles | triângulos | VRAM | ms |
+|---|---|---|---|---|---|
+| Silo | EBGeo hoje | **153** | 853.953 | **67,3 MiB** | **983** |
+| Silo | sem `skipLevelOfDetail` | 223 | 930.081 | 92,1 MiB | 1222 |
+| Ponte | EBGeo hoje | **18** | 27.884 | **1,0 MiB** | **414** |
+| Ponte | sem `skipLevelOfDetail` | 61 | 80.706 | 3,9 MiB | 511 |
+
+31% a 70% menos tiles, 27% a 74% menos VRAM, 19% menos tempo. O artefato de
+ancestral aparecendo através fez o Cesium desligar a opção por padrão na 1.67.
+Ele **foi julgado na tela**, e `bench/capturas/silo-sse16.jpg` contra
+`silo-sem-skiplod.jpg` são indistinguíveis. **Mantenha ligado.**
+
+### Os três `dynamicScreenSpaceError` são INERTES aqui
+
+Medidos em três vistas, 3 a 4 rodadas cada, ligado com os valores da DGEO,
+desligado, e com os valores padrão do Cesium:
+
+| vista | tiles | triângulos | VRAM |
 |---|---|---|---|
-| EBGeo hoje | **92** | 481.173 | **40,5 MiB** |
-| só os defaults do Cesium | 109 | 481.173 | 45,2 MiB |
+| de cima (pitch −35°) | 153 / 153 / 153 | idênticos | 67,3 / 67,3 / 67,3 |
+| rasante (pitch −6°) | 46 / 46 / 46 | idênticos | 4,0 / 4,0 / 4,0 |
+| nível do solo (pitch −2°, 400 m) | 218 / 221 / 221 | 1,30 M / 1,34 M / 1,33 M | 101,2 / 102,7 / 102,1 |
 
-**Mesma geometria visível com 17 tiles a menos e 4,7 MiB a menos.** O
-`skipLevelOfDetail` pula os níveis intermediários, então o mesmo detalhe custa
-menos residência. O Cesium desligou essa opção por padrão na 1.67 por causa do
-artefato de ancestral aparecendo através enquanto os filhos carregam, e esse
-artefato é o preço: **é ele que precisa ser julgado na tela**, não o número.
+Números **iguais dígito a dígito** nas duas primeiras. Na terceira o efeito
+chega a 3% dos triângulos, e o tempo com a opção ligada foi PIOR, dentro do
+ruído.
 
-### Os dois `dynamicScreenSpaceError` continuam sem medida
+A explicação está no fonte, em `Cesium3DTileset.js:updateDynamicScreenSpaceError`:
 
-`Density` 13,9× maior e `Factor` 12× menor que o padrão. Os dois valores vêm de
-um exemplo do Cesium para tileset de cidade visto do horizonte, e a própria
-documentação diz que a opção serve "for street-level horizon views". Um modelo
-isolado, visto de fora, não tem horizonte. **Não medi se ajudam, atrapalham ou
-são inertes aqui**, e a medida travou pelo mesmo estrangulamento de aba descrito
-acima.
+```js
+const t = clamp((height - heightClose) / (heightFar - heightClose), 0, 1);
+horizonFactor = horizonFactor * (1.0 - t);
+tileset._dynamicScreenSpaceErrorComputedDensity = density * horizonFactor;
+```
 
-**`skipLevelOfDetail: true` muda tudo, e por isso uma medida sem ele mente.**
-Medi o SSE duas vezes, e a diferença entre as duas foi só essa opção:
+`heightFar` é a altura MÁXIMA do tileset. Com a câmera acima dela, `t` vale 1, o
+`horizonFactor` zera e a densidade computada vira 0: a otimização não age. Um
+modelo de fotogrametria visto de fora nunca põe a câmera abaixo do próprio topo.
 
-| medida | SSE | tiles |
+**As três linhas podem sair do `map_3d.js`.** Elas não fazem nada neste acervo, e
+sustentam a impressão de que há uma decisão medida por trás.
+
+### O SSE é a alavanca dominante, e nenhuma outra chega perto
+
+Mesma câmera, 3 rodadas:
+
+| modelo | SSE | tiles | triângulos | VRAM | ms | ms por render |
+|---|---|---|---|---|---|---|
+| Silo | 8 | 247 | 1.605.799 | 116,6 | 1516 | 7,85 |
+| Silo | **16** | **153** | **853.953** | **67,3** | **983** | **4,26** |
+| Silo | 32 | 83 | 447.463 | 36,7 | 526 | 2,15 |
+| Ponte | 8 | 41 | 83.087 | 2,7 | 481 | 1,46 |
+| Ponte | **16** | **18** | **27.884** | **1,0** | **414** | **0,79** |
+| Ponte | 32 | 11 | 12.114 | 0,5 | 165 | 0,54 |
+
+Dobrar o SSE corta o trabalho quase pela metade. Nenhuma outra opção do Cesium
+chegou a 30%.
+
+Julgado na tela: `silo-sse32.jpg` e `silo-sse16.jpg` são quase indistinguíveis
+NESTA distância. Isso não autoriza subir o padrão: numa vista próxima o 32
+degrada, e a distância de trabalho de cada operador é outra. Fica como
+possibilidade medida, e não como recomendação.
+
+### `maximumRequestsPerServer`: 18 basta, 50 não rende
+
+A discordância entre duas fontes do time está resolvida para esta máquina.
+Silo, SSE 16, 4 rodadas, com o cache do navegador FRIO. A bancada acrescenta um
+parâmetro único à URL do tileset, e o Cesium o propaga a todo tile derivado.
+
+| caso | ms | amplitude |
 |---|---|---|
-| sem as opções do EBGeo (Ponte de Quatis) | 2 | 6.076 |
-| **com** as opções do EBGeo (Silo) | 1 | **91** |
+| frio, 6 por servidor | 1172 | 538 |
+| frio, **18** (padrão) | **934** | 191 |
+| frio, 50 | 945 | 37 |
+| quente, 18 | 921 | 40 |
 
-O `skipLevelOfDetail` pula os níveis intermediários da árvore, então o SSE
-agressivo custa muito menos do que custaria sem ele. **A conclusão que eu tinha
-tirado antes, de que trocar o SSE renderia 33x, veio da medida sem as opções e
-está errada.** Com o conjunto real do EBGeo, no Silo:
+Subir de 18 para 50 **não rende nada**. Cair para 6 custa 25%.
 
-| SSE | tiles | VRAM |
-|---|---|---|
-| 1 (o que o config publica) | 91 | 40,3 MiB |
-| 16 | 8 | 1,1 MiB |
-
-Ainda é 11x em tiles e 37x em VRAM, mas com 8 tiles o modelo fica grosseiro: aqui
-a escolha é de qualidade e tem de ser julgada na tela, não na tabela.
-
-Quem usa SSE 1 hoje: **6 dos 97 tilesets do config de produção**, todos do DJI
-Terra (`esa`, `7bib`, `beira_rio`, `barragem_faxinal_soturno`,
-`silo_dona_francisca`, `expoex_2026`). Os outros 91 usam o default de 16.
+E o mais importante: **cache frio e cache quente empatam** (934 contra 921). Em
+`localhost` a rede não custa, e o que sobra é CPU de decode. Isto confirma a
+leitura do chefe de que a máquina do cliente dói mais que a banda. E vale só
+para `localhost`: numa rede lenta a medida tem de ser refeita.
 
 ## Draco contra meshopt: o que fechou e o que não
 
@@ -198,16 +270,12 @@ Terra (`esa`, `7bib`, `beira_rio`, `barragem_faxinal_soturno`,
 
 **Não fechou:** o tempo de carga no cliente. Quatro rodadas alternadas deram
 61,4 s e 81,5 s para Draco, e 19,7 s e **83,6 s** para meshopt. Duas medidas do
-mesmo parâmetro que discordam por 4x indicam defeito no instrumento, e este é
-conhecido: **com a aba em segundo plano o Chrome estrangula o `setTimeout`**, e o
-relógio de parede passa a medir o estrangulamento. Trocar para tempo de CPU
-dentro do `render()` também não resolve, porque o decode acontece num Web Worker,
-fora dele.
+mesmo parâmetro que discordam por 4× indicam defeito no instrumento. O defeito
+foi achado e consertado em 2026-08-22: ver "O instrumento" acima. A bancada
+`bench/cesium.html` já reproduz o mesmo caso com 8% de variação.
 
-**A medida que fecha isto é `bench/receita.html` com a aba em primeiro plano**,
-sem trocar de janela durante a corrida. Enquanto ela não for feita, a escolha do
-codec de geometria fica em aberto, e o Draco continua sendo o padrão por ser o
-menor.
+**A comparação em si continua por refazer** com o instrumento novo. O Draco
+segue como padrão por ser o menor em disco e em VRAM, e por decisão do chefe.
 
 ## O gargalo provável não está aqui
 
@@ -218,27 +286,115 @@ Levantado na pesquisa de fontes primárias, e é o achado que reordena a lista:
 `KTX2Transcoder` cria outra. O `_maxDecodingConcurrency` que parece concorrência
 é o tamanho da **fila**, não o número de workers.
 
-Isso explica por que subir a concorrência de rede do Cesium rende pouco, e o
-próprio time diz isso: "Raising this value did not result in performance gains
-due to bottlenecks in other places in the pipeline"
-([issue #11627](https://github.com/CesiumGS/cesium/issues/11627)).
+Isso explica por que subir a concorrência de rede do Cesium rende pouco. O
+próprio time diz o mesmo no
+[issue #11627](https://github.com/CesiumGS/cesium/issues/11627): subir o valor
+não rendeu, por gargalo em outro ponto do fluxo.
+
+**Isto agora está medido aqui, e confere:** 18 e 50 requisições por servidor
+empatam, e cache frio empata com cache quente. Ver a seção do
+`maximumRequestsPerServer` acima.
 
 **Consequência para nós:** o serviço entrega 3.645 tiles por segundo, e um
 navegador com uma thread de Draco não consome isso. Afinar pragma do SQLite antes
 de medir o cliente é otimizar o lado que sobra.
 
+## A camada de formato: a textura é o byte, e não o tempo
+
+Amostra de 250 tiles por modelo, somando os `bufferView` de imagem contra o
+resto:
+
+| modelo | textura | geometria | textura é |
+|---|---|---|---|
+| Silo (DJI Terra) | 47,3 MiB | 8,1 MiB | **85%** |
+| Ponte (Metashape) | 6,9 MiB | 1,7 MiB | **80%** |
+
+E no acervo inteiro, medido em 114 modelos e 11.261 tiles amostrados da origem:
+a mediana da fração de imagem por tile é **78%**.
+
+Toda a discussão de Draco contra meshopt, e os bits de quantização, mexem nos
+15% a 20% que sobram.
+
+### O excesso de resolução é do DJI Terra, e não do acervo
+
+| resolução | silo | ponte |
+|---|---|---|
+| 1024×1024 | 67,8% dos bytes de textura | 0% |
+| 512×512 | 28,2% | 18,1% |
+| 512×256 e 768×256 | — | 70,1% |
+
+No acervo: **10,7% dos pixels passam de 512×512**, e eles se concentram em 7
+modelos do DJI Terra que somam 11,2 GiB. Nos modelos do Metashape a fatia fica
+abaixo de 22%, quase sempre abaixo de 14%.
+
+### O que o teto de 512 compra, e o que não compra
+
+O Silo foi reconvertido inteiro com `--max-textura 512` e medido lado a lado:
+
+| | disco | conversão | VRAM longe | VRAM perto | ms longe | ms perto |
+|---|---|---|---|---|---|---|
+| 1024 (hoje) | 338,4 MiB | 245,4 s | 69,2 MiB | 45,0 MiB | 915 | 426 |
+| 512 | **214,5 MiB** | **118,2 s** | **61,7 MiB** | **31,1 MiB** | 929 | 419 |
+| diferença | −37% | 2,1× mais rápido | −11% | −31% | **nenhuma** | **nenhuma** |
+
+Só a VRAM de textura: 37,6 para 30,1 MiB de longe, e 29,7 para 15,8 MiB de perto.
+
+**O TEMPO NÃO MUDA, nem com o cache do navegador frio.** Isto refuta a hipótese
+que abriu esta investigação: a textura é 85% do byte, mas não é o gargalo de
+tempo. O teto compra disco e VRAM, e não velocidade.
+
+E cobra. Julgue em `bench/capturas/silo-tex512-perto.jpg` contra
+`silo-tex1024-perto.jpg`, com a câmera a cerca de 157 m. O 512 **amacia a telha
+do galpão e apaga a divisão dos painéis solares**. De longe as duas são
+indistinguíveis.
+
+Por isso `MAX_TEXTURA` em `scripts/lib/tileset.js` **vem vazio**. Diferente da
+escala do `geometricError`, que corrige um defeito da origem sem custo, o teto
+troca qualidade por tamanho. Quem decide a troca é o chefe:
+`--max-textura 512`.
+
+## A camada SQLite: a ordem física, medida de duas formas
+
+A hipótese: a importação insere na ordem em que varre o diretório de origem, e o
+CesiumJS lê na ordem de travessia da árvore. Se as duas divergirem, cada tile
+pedido cai numa página distante.
+
+`node --expose-gc bench/ordem.js --modelo ponte-quatis` monta duas cópias do
+mesmo modelo, com os mesmos pragmas e o mesmo conteúdo, mudando só a ordem de
+inserção. Resultado: **empate, −0,4%**. E o próprio roteiro avisa por quê. O
+modelo cabe folgado na memória do sistema, e o cache de página serve tudo. Ali
+as duas ordens empatam por construção.
+
+A medida que fecha não é de tempo, é de contagem. O offset acumulado por rowid
+aproxima a posição física, porque o BLOB médio é dez vezes maior que a página:
+
+| modelo | salto mediano na ordem de travessia | tamanho de um tile | razão | saltos abaixo de 1 MiB |
+|---|---|---|---|---|
+| Ponte (Metashape) | 0,09 MiB | 39 KiB | 2× | **98,9%** |
+| Silo (DJI Terra) | 0,73 MiB | 219 KiB | 3× | **59,8%** |
+
+**A ordem física do Metashape já é quase a de travessia**, porque a varredura do
+diretório segue as pastas `Data/dNNN`. A do DJI dispersa: o p90 do salto é
+23 MiB.
+
+Reordenar custaria um passe de reescrita no fim da importação. Não rende nada
+nesta máquina, e pode render no servidor de produção, que serve 104 GiB com
+muito menos memória que isso. **Fica como hipótese com medida pendente lá**, e
+não como mudança a fazer no escuro.
+
 ## A próxima medida, nesta ordem
 
-1. **Onde o tempo vai, no cliente.** Instrumentar com `performance.mark` em torno
-   do decode e comparar com o tempo de rede, numa trilha de câmera repetível. Se
-   o decode domina, todo o resto é ruído.
-2. **`mmap_size` num modelo grande.** O `ponte-quatis` tem 294 MiB e cabe no cache
-   do sistema; num de 10 GiB o mmap decide. Rodar `npm run bench` contra o maior
-   modelo importado.
-3. **`maximumRequestsPerServer` do Cesium**, hoje 18 por padrão. Duas fontes do
-   mesmo time discordam sobre subir: uma diz que não rendeu, outra diz que já viu
-   ganho com 50. Discordância entre duas medidas do mesmo parâmetro é sinal de
-   dependência de contexto, então o número tem de sair da nossa máquina.
+1. **Onde o tempo vai, dentro do cliente.** Não é rede: frio e quente empatam. Não é
+   resolução de textura: o teto não mudou o tempo. Não é o número de conexões:
+   18 e 50 empatam. Sobram o decode Draco, a transcodificação KTX2 e a montagem
+   da cena. `performance.mark` em torno de
+   cada um, com o instrumento que agora funciona.
+2. **A mesma bateria numa rede lenta de verdade.** Tudo acima foi medido em
+   `localhost`, onde a banda não custa. O `maximumRequestsPerServer` e o teto de
+   textura podem inverter de veredito ali.
+3. **`mmap_size` num modelo grande.** O maior publicado tem 294 MiB e cabe no
+   cache do sistema. Num de 10 GiB o mmap decide.
+4. **A ordem física no servidor de produção**, onde o acervo não cabe na memória.
 
 ## Números do cliente que valem conferir
 

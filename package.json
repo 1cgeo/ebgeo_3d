@@ -16,7 +16,8 @@
     "lint:fix": "eslint . --fix",
     "knip": "knip",
     "bench": "node --expose-gc bench/banco.js",
-    "bench:http": "node bench/http.js"
+    "bench:http": "node bench/http.js",
+    "bench:cliente": "node bench/cliente.js"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",

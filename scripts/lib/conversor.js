@@ -42,7 +42,7 @@ import { paraKTX2, abrirTemporario, fecharTemporario, QLEVEL_PADRAO } from './kt
  * Monta um conversor. Caro: chame uma vez por worker.
  * @returns {Promise<Conversor>}
  */
-export async function criarConversor({ geometria = 'draco', upAxis = 'Y' } = {}) {
+export async function criarConversor({ geometria = 'draco', upAxis = 'Y', maxTextura = 0 } = {}) {
   const io = new NodeIO()
     .registerExtensions(ALL_EXTENSIONS)
     .registerDependencies({
@@ -92,7 +92,7 @@ export async function criarConversor({ geometria = 'draco', upAxis = 'Y' } = {})
       for (const tex of doc.getRoot().listTextures()) {
         const imagem = tex.getImage();
         if (!imagem) continue;
-        const ktx = await paraKTX2(Buffer.from(imagem), { tmp, seq: seq++, qlevel });
+        const ktx = await paraKTX2(Buffer.from(imagem), { tmp, seq: seq++, qlevel, maxTextura });
         if (!ktx) { falhas++; continue; }
         tex.setImage(new Uint8Array(ktx)).setMimeType('image/ktx2');
         texturas++;

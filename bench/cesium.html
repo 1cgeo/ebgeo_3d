@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Bancada de cliente</title>
+<link rel="stylesheet" href="/cesium/Widgets/widgets.css">
+<style>
+  html,body{margin:0;height:100%;background:#111;color:#e8e8e8;font:11px ui-monospace,monospace;overflow:hidden}
+  #cesiumContainer{position:absolute;inset:0}
+  #hud{position:absolute;left:8px;top:8px;right:8px;max-height:74%;overflow:auto;
+       background:rgba(0,0,0,.9);padding:10px 12px;border:1px solid #444;z-index:9;
+       white-space:pre;line-height:1.5}
+  .mau{color:#ff7b72}
+  .bom{color:#7ee787}
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<pre id="hud">carregando CesiumJS...</pre>
+<script src="/cesium/Cesium.js"></script>
+<script>
+/* =====================================================================
+   O INSTRUMENTO, E POR QUE ELE NAO USA requestAnimationFrame
+
+   A bancada anterior mediu a MESMA variante em 19,7 s e em 83,6 s. A causa
+   ficou provada em 2026-08-22: numa aba que o Chrome considera `hidden`, o
+   `requestAnimationFrame` NAO DISPARA NENHUM QUADRO. Um laco que espera 1
+   segundo de rAF ali nunca termina.
+
+   E `setTimeout` nao salva: numa aba oculta ele e limitado a cerca de um
+   disparo por segundo.
+
+   O agendador que escapa dos dois e o MessageChannel. Medido na mesma aba
+   oculta: 107.599 ticks em 1 segundo, contra ZERO quadros de rAF. Com ele a
+   bancada chama `scene.render()` explicitamente, e o relogio volta a medir o
+   modelo em vez da politica de agendamento do navegador.
+
+   RESSALVA QUE FICA: com a aba oculta o compositor do Chrome nao apresenta o
+   quadro na tela. O trabalho de WebGL acontece, e o decode roda em Web Worker,
+   que a visibilidade nao estrangula. O `msPorRender` daqui serve para COMPARAR
+   variantes entre si, e nao para prometer taxa de tela ao usuario final.
+
+   O instrumento REPROVA A SI MESMO: se a cadencia do agendador passar de 5 ms,
+   alguem o estrangulou, e a medida sai marcada INVALIDA.
+   ===================================================================== */
+
+const L = [];
+const hud = document.getElementById('hud');
+function log(s, cls) {
+  L.push(cls ? '<span class="' + cls + '">' + s + '</span>' : s);
+  hud.innerHTML = L.join('\n');
+  hud.scrollTop = hud.scrollHeight;
+}
+
+const BASE = 'http://127.0.0.1:8082/api/v1/models';
+
+/** As 15 opcoes que o ebgeo_web aplica hoje em map_3d.js:createOptimizedTileset. */
+const EBGEO = {
+  preferLeaves: false,
+  skipLevelOfDetail: true,
+  baseScreenSpaceError: 1024,
+  skipScreenSpaceErrorFactor: 16,
+  skipLevels: 1,
+  cacheBytes: 1073741824,
+  dynamicScreenSpaceError: true,
+  dynamicScreenSpaceErrorDensity: 0.00278,
+  dynamicScreenSpaceErrorFactor: 2.0,
+  dynamicScreenSpaceErrorHeightFalloff: 0.25,
+  cullWithChildrenBounds: true,
+  cullRequestsWhileMoving: true,
+  cullRequestsWhileMovingMultiplier: 60.0,
+  foveatedScreenSpaceError: true,
+};
+
+/** Os modelos publicados, com o ponto que o catalogo MEDE. */
+// lon, lat, chao e raio SAO MEDIDOS: saem do `envelopeGeodesico` da importacao,
+// e nao de estimativa. `node scripts/remedir.js --dry-run` os reimprime.
+const MODELOS = {
+  'silo-dona-francisca': { lon: -53.374417, lat: -29.626104, chao: 62.3, raio: 627 },
+  'silo-tex512': { lon: -53.374417, lat: -29.626104, chao: 62.3, raio: 627 },
+  'ponte-quatis': { lon: -44.286984, lat: -22.400374, chao: 343.2, raio: 655 },
+};
+
+let viewer;
+let sc;
+window.R = [];
+
+/* --- o agendador --- */
+const _mc = new MessageChannel();
+const _fila = [];
+_mc.port1.onmessage = function () { const f = _fila.shift(); if (f) f(); };
+/** Uma task de macro fila, que a aba oculta NAO estrangula. */
+function tick() {
+  return new Promise(function (r) { _fila.push(r); _mc.port2.postMessage(0); });
+}
+
+/** Mede a cadencia ociosa do agendador, em ms por tick. */
+async function cadenciaOciosa(ms) {
+  const t0 = performance.now();
+  let n = 0;
+  while (performance.now() - t0 < ms) { await tick(); n++; }
+  return (performance.now() - t0) / n;
+}
+
+/**
+ * Poe a camera para ver o modelo INTEIRO, a partir da esfera do proprio tileset.
+ *
+ * A primeira versao mirava o ponto do catalogo a uma distancia fixa, e a captura
+ * mostrou o modelo no canto da tela, com o resto preto. Contar tile de uma cena
+ * quase vazia mede o enquadramento, e nao a opcao em teste.
+ *
+ * `dist` passa a ser um MULTIPLICADOR do raio da esfera, e nao metros: assim o
+ * mesmo caso enquadra igual em modelos de tamanhos diferentes.
+ */
+function enquadra(ts, fator, pitch) {
+  const alvo = MODELOS[ts.__modelo];
+  const centro = Cesium.Cartesian3.fromDegrees(alvo.lon, alvo.lat, alvo.chao);
+  const raio = alvo.raio;
+  const dist = raio * (fator || 2.0);
+  const p = Cesium.Math.toRadians(pitch == null ? -35 : pitch);
+  const h = Cesium.Math.toRadians(25);
+
+  // setView COM POSICAO CALCULADA A MAO, e nao lookAt, viewBoundingSphere ou
+  // flyToBoundingSphere. As tres deixaram o modelo fora do quadro ou nem
+  // moveram a camera num laco de render manual: medido, davam 3 tiles, 0
+  // triangulo e a tela preta. `setView` posiciona na hora e nao agenda nada.
+  const enu = Cesium.Transforms.eastNorthUpToFixedFrame(centro);
+  const local = new Cesium.Cartesian3(
+    dist * Math.cos(p) * Math.sin(h),
+    -dist * Math.cos(p) * Math.cos(h),
+    -dist * Math.sin(p));
+  const posicao = Cesium.Matrix4.multiplyByPoint(enu, local, new Cesium.Cartesian3());
+  const direcao = Cesium.Cartesian3.normalize(
+    Cesium.Cartesian3.subtract(centro, posicao, new Cesium.Cartesian3()),
+    new Cesium.Cartesian3());
+  // `up` TEM DE SER ORTOGONAL A `direction`. Passar o vertical geocentrico cru
+  // deixa os dois oblíquos, e o Cesium acomoda a diferenca girando a cena: o
+  // modelo saiu do centro do quadro nas primeiras capturas por isto.
+  const vertical = Cesium.Cartesian3.normalize(posicao, new Cesium.Cartesian3());
+  const direita = Cesium.Cartesian3.normalize(
+    Cesium.Cartesian3.cross(direcao, vertical, new Cesium.Cartesian3()),
+    new Cesium.Cartesian3());
+  const cima = Cesium.Cartesian3.normalize(
+    Cesium.Cartesian3.cross(direita, direcao, new Cesium.Cartesian3()),
+    new Cesium.Cartesian3());
+  sc.camera.setView({ destination: posicao, orientation: { direction: direcao, up: cima } });
+}
+
+
+/** Roda um caso e devolve a medida, com veredito do instrumento. */
+let _frio = 0;
+
+/**
+ * Roda um caso e devolve a medida, com veredito do instrumento.
+ *
+ * `frio` acrescenta um parametro unico a URL do tileset. O Cesium propaga os
+ * query parameters da raiz para todo tile derivado, entao a URL de cada tile
+ * muda e o cache do navegador nao responde nenhuma. Sem isto a segunda rodada
+ * mede so o decode, porque o tile e servido com `immutable` de um ano.
+ */
+async function roda(rotulo, modelo, extras, dist, pitch, frio, reqPorServidor) {
+  // `maximumRequestsPerServer` e ESTATICO no RequestScheduler, e nao opcao do
+  // tileset: por isso ele entra aqui, e nao em `extras`.
+  if (reqPorServidor) Cesium.RequestScheduler.maximumRequestsPerServer = reqPorServidor;
+  if (!MODELOS[modelo]) throw new Error('modelo desconhecido: ' + modelo);
+
+  // Tabula rasa. Sem isto o tile do caso anterior conta como pronto.
+  for (let i = sc.primitives.length - 1; i >= 0; i--) {
+    const p = sc.primitives.get(i);
+    if (p instanceof Cesium.Cesium3DTileset) sc.primitives.remove(p);
+  }
+  sc.render();
+  await tick();
+
+  const opcoes = Object.assign({}, EBGEO, extras || {});
+  const t0 = performance.now();
+
+  const url = BASE + '/' + modelo + '/tileset.json' + (frio ? '?frio=' + (++_frio) : '');
+  const ts = await Cesium.Cesium3DTileset.fromUrl(url, opcoes);
+  ts.__modelo = modelo;
+  sc.primitives.add(ts);
+
+  enquadra(ts, dist, pitch);
+
+  // Roda ate estabilizar: 20 renders seguidos sem pedido pendente.
+  // O TETO E DE TEMPO, e nao de contagem de render: com o MessageChannel o
+  // render acontece rapido demais para um teto de quadros querer dizer algo.
+  let quieto = 0;
+  let renders = 0;
+  const LIMITE_MS = 120000;
+  while (quieto < 20 && performance.now() - t0 < LIMITE_MS) {
+    sc.render();
+    await tick();
+    renders++;
+    const st = ts.statistics;
+    quieto = (st.numberOfPendingRequests === 0 && st.numberOfTilesWithContentReady > 0)
+      ? quieto + 1 : 0;
+  }
+  const msCarga = performance.now() - t0;
+  const estourou = msCarga >= LIMITE_MS;
+
+  // Custo de um quadro com a cena ja estavel.
+  const tf = performance.now();
+  let nq = 0;
+  while (performance.now() - tf < 2000) { sc.render(); await tick(); nq++; }
+  const msPorRender = (performance.now() - tf) / nq;
+
+  // VEREDITO DO INSTRUMENTO, e nao do caso.
+  const cad = await cadenciaOciosa(150);
+  const valido = !estourou && cad < 5;
+
+  const s = ts.statistics;
+  const e = {
+    caso: rotulo,
+    modelo: modelo,
+    tiles: s.numberOfTilesWithContentReady,
+    tri: s.numberOfTrianglesSelected,
+    visitados: s.visited,
+    vram: +(ts.totalMemoryUsageInBytes / 1048576).toFixed(1),
+    tex: +(s.texturesByteLength / 1048576).toFixed(1),
+    geo: +(s.geometryByteLength / 1048576).toFixed(1),
+    ms: Math.round(msCarga),
+    renders: renders,
+    msPorRender: +msPorRender.toFixed(2),
+    cadencia: +cad.toFixed(3),
+    frio: !!frio,
+    reqPorServidor: Cesium.RequestScheduler.maximumRequestsPerServer,
+    valido: valido,
+    motivo: valido ? '' : (estourou ? 'estourou o limite de tempo'
+      : 'agendador a ' + cad.toFixed(1) + ' ms por tick'),
+  };
+  window.R.push(e);
+  sc.primitives.remove(ts);
+  return e;
+}
+
+function pad(v, n) { return String(v).padStart(n); }
+
+function linha(e) {
+  return e.caso.padEnd(30)
+    + ' tiles ' + pad(e.tiles, 5)
+    + ' tri ' + pad(e.tri, 9)
+    + ' VRAM ' + pad(e.vram, 7)
+    + ' ms ' + pad(e.ms, 6)
+    + ' ms/render ' + pad(e.msPorRender, 6)
+    + (e.valido ? '  ok' : '  INVALIDO (' + e.motivo + ')');
+}
+
+/**
+ * Carrega um caso e DEIXA na tela, para a captura de tela julgar a qualidade.
+ *
+ * A contagem de tile e de triangulo diz quanto custou, nunca se ficou bom. Um
+ * SSE que corta 80% do trabalho e otimo ate alguem olhar o buraco que ele
+ * deixou. Esta funcao existe para essa segunda pergunta.
+ */
+window.mostra = async function (modelo, extras, dist, pitch, nome) {
+  for (let i = sc.primitives.length - 1; i >= 0; i--) {
+    const p = sc.primitives.get(i);
+    if (p instanceof Cesium.Cesium3DTileset) sc.primitives.remove(p);
+  }
+  const ts = await Cesium.Cesium3DTileset.fromUrl(
+    BASE + '/' + modelo + '/tileset.json', Object.assign({}, EBGEO, extras || {}));
+  ts.__modelo = modelo;
+  sc.primitives.add(ts);
+  enquadra(ts, dist, pitch);
+  const t0 = performance.now();
+  let quieto = 0;
+  while (quieto < 25 && performance.now() - t0 < 60000) {
+    sc.render();
+    await tick();
+    const st = ts.statistics;
+    quieto = (st.numberOfPendingRequests === 0 && st.numberOfTilesWithContentReady > 0)
+      ? quieto + 1 : 0;
+  }
+  const s = ts.statistics;
+  const saida = {
+    tiles: s.numberOfTilesWithContentReady,
+    tri: s.numberOfTrianglesSelected,
+    vram: +(ts.totalMemoryUsageInBytes / 1048576).toFixed(1),
+  };
+  if (nome) {
+    sc.render();
+    const dataURL = viewer.canvas.toDataURL('image/jpeg', 0.85);
+    const r = await fetch('/captura', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: nome, dataURL: dataURL }),
+    });
+    saida.captura = (await r.json()).arquivo;
+  }
+  return saida;
+};
+
+/** Devolve o HUD, que `mostra` esconde para a captura. */
+window.hudVolta = function () { hud.style.display = 'block'; };
+
+/**
+ * Roda a lista de casos R vezes, INTERCALANDO.
+ * Rodar A tres vezes e depois B tres vezes mediria tambem a ordem.
+ */
+window.compara = async function (casos, rodadas) {
+  rodadas = rodadas || 3;
+  window.R = [];
+  document.title = 'Bancada - RODANDO';
+  for (let r = 1; r <= rodadas; r++) {
+    log('--- rodada ' + r + ' de ' + rodadas + ' ---');
+    for (const c of casos) {
+      const e = await roda(c.rotulo, c.modelo, c.extras, c.dist, c.pitch, c.frio, c.req);
+      log(linha(e), e.valido ? null : 'mau');
+    }
+  }
+
+  const porCaso = new Map();
+  for (const e of window.R) {
+    if (!e.valido) continue;
+    if (!porCaso.has(e.caso)) porCaso.set(e.caso, []);
+    porCaso.get(e.caso).push(e);
+  }
+  log('\n=== mediana das rodadas validas ===');
+  const resumo = [];
+  porCaso.forEach(function (es, caso) {
+    function med(f) {
+      const v = es.map(f).sort(function (a, b) { return a - b; });
+      return v[Math.floor(v.length / 2)];
+    }
+    function amp(f) {
+      const v = es.map(f);
+      return +(Math.max.apply(null, v) - Math.min.apply(null, v)).toFixed(2);
+    }
+    const r = {
+      caso: caso,
+      n: es.length,
+      tiles: med(function (x) { return x.tiles; }),
+      tri: med(function (x) { return x.tri; }),
+      vram: med(function (x) { return x.vram; }),
+      tex: med(function (x) { return x.tex; }),
+      geo: med(function (x) { return x.geo; }),
+      ms: med(function (x) { return x.ms; }),
+      msAmplitude: amp(function (x) { return x.ms; }),
+      msPorRender: med(function (x) { return x.msPorRender; }),
+    };
+    resumo.push(r);
+    log(caso.padEnd(30) + ' n' + r.n
+      + ' tiles ' + pad(r.tiles, 5)
+      + ' tri ' + pad(r.tri, 9)
+      + ' VRAM ' + pad(r.vram, 7)
+      + ' ms ' + pad(r.ms, 6) + ' (amplitude ' + r.msAmplitude + ')'
+      + ' ms/render ' + pad(r.msPorRender, 6));
+  });
+  const invalidas = window.R.filter(function (e) { return !e.valido; }).length;
+  if (invalidas) {
+    log('\n' + invalidas + ' de ' + window.R.length + ' medidas INVALIDAS: nao use este resultado.', 'mau');
+  } else {
+    log('\n' + window.R.length + ' medidas, todas validas.', 'bom');
+  }
+  window.RESUMO = resumo;
+  document.title = invalidas ? 'Bancada - INVALIDO' : 'Bancada - PRONTO';
+  return resumo;
+};
+
+(async function () {
+  viewer = new Cesium.Viewer('cesiumContainer', {
+    baseLayer: false, baseLayerPicker: false, geocoder: false, homeButton: false,
+    sceneModePicker: false, navigationHelpButton: false, animation: false,
+    timeline: false, infoBox: false, selectionIndicator: false, fullscreenButton: false,
+    useDefaultRenderLoop: false,
+    // preserveDrawingBuffer E OBRIGATORIO PARA A CAPTURA. Sem ele o navegador
+    // pode limpar o framebuffer logo depois do render, e `toDataURL` devolve
+    // uma imagem preta. Custa um pouco de desempenho, e por isso o `msPorRender`
+    // desta bancada nao serve para prometer taxa de tela em producao.
+    contextOptions: { webgl: { preserveDrawingBuffer: true } },
+  });
+  sc = viewer.scene;
+  window.__viewer = viewer;
+  sc.globe.show = false;
+  sc.skyBox.show = false;
+  sc.skyAtmosphere.show = false;
+  sc.light = new Cesium.DirectionalLight({ direction: new Cesium.Cartesian3(0.35, -0.5, -0.8) });
+
+  const cad = await cadenciaOciosa(200);
+  log('CesiumJS ' + Cesium.VERSION
+    + '   visibilidade: ' + document.visibilityState
+    + '   agendador: ' + cad.toFixed(3) + ' ms por tick');
+  log('maximumRequestsPerServer ' + Cesium.RequestScheduler.maximumRequestsPerServer
+    + '   maximumRequests ' + Cesium.RequestScheduler.maximumRequests);
+  log('use compara([{rotulo, modelo, extras, dist}], rodadas)');
+  document.title = 'Bancada - PRONTO';
+})().catch(function (e) {
+  log('FALHA: ' + e.stack, 'mau');
+  document.title = 'Bancada - ERRO';
+});
+</script>
+</body>
+</html>

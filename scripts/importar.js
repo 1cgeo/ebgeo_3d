@@ -29,7 +29,7 @@
  *
  * Uso:
  *   node scripts/importar.js --origem <dir> --id <slug> [--nome "..."]
- *                            [--workers N] [--qlevel 200] [--forcar]
+ *                            [--workers N] [--qlevel 200] [--max-textura auto|N|0] [--forcar]
  *                            [--limite N] [--dry-run]
  */
 
@@ -43,8 +43,10 @@ import config from '../src/config.js';
 import { createModelDb, finalizarModelDb, getIndexDb, closeAll, closeModelDb } from '../src/db/connection.js';
 import { upsertModel, openImport, closeImport, getModelAny } from '../src/db/queries.js';
 import { versaoKtx, QLEVEL_PADRAO } from './lib/ktx2.js';
-import { reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE } from './lib/tileset.js';
-import { tipoDeTile } from './lib/b3dm.js';
+import {
+  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE, MAX_TEXTURA,
+} from './lib/tileset.js';
+import { tipoDeTile, abrirTile, leGerador } from './lib/b3dm.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -80,6 +82,9 @@ function args() {
     nome: v('--nome'),
     workers: parseInt(v('--workers', String(Math.max(1, Math.min(12, availableParallelism() - 2)))), 10),
     qlevel: parseInt(v('--qlevel', String(QLEVEL_PADRAO)), 10),
+    // 'auto' aplica o teto que MAX_TEXTURA conhece para o motor que a conversao
+    // leu do proprio glTF, do mesmo jeito que `--escala-ge auto`.
+    maxTextura: v('--max-textura', 'auto'),
     geometria: v('--geometria', 'draco'),
     escalaGe: v('--escala-ge', 'auto'),
     limite: v('--limite') ? parseInt(v('--limite'), 10) : null,
@@ -129,7 +134,7 @@ function inventaria(raiz) {
  * @returns {Promise<object>} totais da conversao
  */
 function converteTiles(ctx) {
-  const { raiz, tiles, db, workers, qlevel, geometria, upAxis, log } = ctx;
+  const { raiz, tiles, db, workers, qlevel, geometria, upAxis, maxTextura, log } = ctx;
   return new Promise((resolve, reject) => {
     const inserir = db.prepare('INSERT OR REPLACE INTO media (key, content) VALUES (?, ?)');
     const gravarLote = db.transaction((linhas) => {
@@ -166,7 +171,7 @@ function converteTiles(ctx) {
     };
 
     for (let i = 0; i < workers; i++) {
-      const w = new Worker(join(__dirname, 'converter-worker.js'), { workerData: { qlevel, geometria, upAxis } });
+      const w = new Worker(join(__dirname, 'converter-worker.js'), { workerData: { qlevel, geometria, upAxis, maxTextura } });
       vivos.add(w);
 
       w.on('message', (m) => {
@@ -249,7 +254,7 @@ async function main() {
     return;
   }
   if (!o.origem || !o.id) {
-    console.error('Uso: node scripts/importar.js --origem <dir> --id <slug> [--nome "..."] [--workers N] [--qlevel 200] [--forcar]');
+    console.error('Uso: node scripts/importar.js --origem <dir> --id <slug> [--nome "..."] [--workers N] [--qlevel 200] [--max-textura auto|N|0] [--forcar]');
     process.exit(2);
   }
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(o.id)) {
@@ -324,6 +329,25 @@ async function main() {
     amostraContainers.add(tipoDeTile(readFileSync(join(o.origem, t)).subarray(0, 4)));
   }
   log(`  containers na amostra: ${[...amostraContainers].join(', ')}`);
+
+  // O MOTOR TEM DE SAIR AQUI, e nao no fim: o teto de textura entra no
+  // workerData, e o worker nasce antes do primeiro tile ser lido. A escala do
+  // geometricError pode esperar, porque a reescrita acontece depois.
+  const motorAmostra = (() => {
+    for (const t of tiles.slice(0, 20)) {
+      try {
+        const tile = abrirTile(readFileSync(join(o.origem, t)));
+        const g = tile && tile.glb ? leGerador(tile.glb) : null;
+        if (g) return g;
+      } catch { /* tile ilegivel na amostra: tenta o proximo */ }
+    }
+    return null;
+  })();
+  const maxTextura = o.maxTextura === 'auto'
+    ? (MAX_TEXTURA[motorAmostra] || 0)
+    : Number(o.maxTextura);
+  log(`  motor na amostra: ${motorAmostra || 'desconhecido'}`
+    + `   teto de textura: ${maxTextura ? `${maxTextura} px` : 'nenhum'}`);
   for (const c of amostraContainers) {
     if (c !== 'b3dm' && c !== 'glb') {
       console.error(`ERRO: container "${c}" nao e convertido por este roteiro.`);
@@ -363,8 +387,8 @@ async function main() {
   const token = `${Date.now().toString(36)}`;
   const importId = openImport(o.id, o.origem);
 
-  passo(`3. conversao (${o.workers} workers, geometria=${o.geometria}, qlevel=${o.qlevel}, upAxis=${upAxis}, ${ktxVersao})`);
-  const conv = await converteTiles({ raiz: o.origem, tiles, db, workers: o.workers, qlevel: o.qlevel, geometria: o.geometria, upAxis, log });
+  passo(`3. conversao (${o.workers} workers, geometria=${o.geometria}, qlevel=${o.qlevel}, upAxis=${upAxis}, maxTextura=${maxTextura || 'nenhum'}, ${ktxVersao})`);
+  const conv = await converteTiles({ raiz: o.origem, tiles, db, workers: o.workers, qlevel: o.qlevel, geometria: o.geometria, upAxis, maxTextura, log });
   const taxa = conv.convertidos / conv.segundos;
   log(`  ${conv.convertidos.toLocaleString('pt-BR')} tiles em ${conv.segundos.toFixed(1)} s (${taxa.toFixed(1)} tiles/s)`);
   log(`  texturas ${conv.texturas.toLocaleString('pt-BR')}   triangulos ${conv.triangulos.toLocaleString('pt-BR')}`);

@@ -6,8 +6,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { abrirTile, tipoDeTile, leGerador } from '../scripts/lib/b3dm.js';
+import { dimensaoAlvo } from '../scripts/lib/ktx2.js';
 import {
-  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE,
+  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE, MAX_TEXTURA,
 } from '../scripts/lib/tileset.js';
 
 /** Monta um glb minimo valido (so o chunk JSON). */
@@ -294,4 +295,43 @@ test('envelopeGeodesico nao entra duas vezes no mesmo tileset externo', () => {
     }],
   ]);
   assert.equal(envelopeGeodesico(docs).amostras, 8);
+});
+
+/* ===================================================================== */
+/* dimensaoAlvo: o teto de textura                                       */
+/* ===================================================================== */
+
+test('sem teto, dimensaoAlvo so alinha ao bloco de 4', () => {
+  assert.deepEqual(dimensaoAlvo(1024, 1024), { largura: 1024, altura: 1024 });
+  assert.deepEqual(dimensaoAlvo(1023, 511), { largura: 1020, altura: 508 });
+  assert.deepEqual(dimensaoAlvo(3, 3), { largura: 4, altura: 4 });
+});
+
+test('o teto reduz o LADO MAIOR e preserva a proporcao', () => {
+  // 1024x1024 -> 512x512: o caso do DJI Terra.
+  assert.deepEqual(dimensaoAlvo(1024, 1024, 512), { largura: 512, altura: 512 });
+  // 1024x512 -> 512x256. Reduzir os dois lados ao teto DEFORMARIA a textura, e
+  // a UV do tile passaria a apontar para o pixel errado.
+  assert.deepEqual(dimensaoAlvo(1024, 512, 512), { largura: 512, altura: 256 });
+  assert.deepEqual(dimensaoAlvo(512, 1024, 512), { largura: 256, altura: 512 });
+});
+
+test('o teto nao AUMENTA textura que ja esta abaixo dele', () => {
+  // O acervo do Metashape e quase todo 256x256 e 512x256: o teto tem de ser
+  // inerte ali, e nao ampliar nada.
+  assert.deepEqual(dimensaoAlvo(256, 256, 512), { largura: 256, altura: 256 });
+  assert.deepEqual(dimensaoAlvo(512, 256, 512), { largura: 512, altura: 256 });
+  assert.deepEqual(dimensaoAlvo(768, 256, 1024), { largura: 768, altura: 256 });
+});
+
+test('o teto e o alinhamento se aplicam nesta ordem', () => {
+  // 768x256 com teto 500: fator 500/768, da 500x167, e o alinhamento corta
+  // para 500x164. Alinhar antes do teto daria outro numero.
+  assert.deepEqual(dimensaoAlvo(768, 256, 500), { largura: 500, altura: 164 });
+});
+
+test('MAX_TEXTURA vem vazio: o teto NAO se liga sozinho', () => {
+  // O teto troca qualidade por tamanho, e a troca aparece de perto. Ligar por
+  // padrao seria decidir no lugar do chefe. Ver docs/desempenho.md.
+  assert.equal(Object.keys(MAX_TEXTURA).length, 0);
 });
