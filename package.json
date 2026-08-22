@@ -1,0 +1,41 @@
+{
+  "name": "ebgeo-3d-service",
+  "version": "1.0.0",
+  "description": "3D tileset service for EBGeo",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --env-file=.env src/server.js",
+    "dev": "node --env-file=.env --watch src/server.js",
+    "importar": "node scripts/importar.js",
+    "inventario": "node scripts/inventario.js",
+    "verificar": "node scripts/verificar.js",
+    "catalogo": "node scripts/catalogo.js",
+    "cleanup-wal": "node scripts/cleanup-wal.js",
+    "test": "node --test tests/*.test.js",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "knip": "knip"
+  },
+  "dependencies": {
+    "@fastify/compress": "^8.3.1",
+    "@fastify/cors": "^10.0.2",
+    "@gltf-transform/core": "^4.4.2",
+    "@gltf-transform/extensions": "^4.4.2",
+    "better-sqlite3": "^12.11.1",
+    "draco3dgltf": "^1.5.7",
+    "fastify": "^5.2.1",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "globals": "^15.15.0",
+    "knip": "^5.83.1"
+  },
+  "author": "1º Centro de Geoinformação",
+  "license": "ISC",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

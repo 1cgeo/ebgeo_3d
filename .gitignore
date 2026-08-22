@@ -1,0 +1,18 @@
+node_modules/
+.env
+*.log
+npm-debug.log*
+
+# Dados servidos: bancos por modelo, index e assets. Nunca versionados.
+data/
+!data/.gitkeep
+
+# Sobras de SQLite
+*.db-wal
+*.db-shm
+*.3dtiles-wal
+*.3dtiles-shm
+
+# Saidas de trabalho da importacao
+tmp/
+*.3tz
