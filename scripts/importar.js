@@ -80,6 +80,7 @@ function args() {
     nome: v('--nome'),
     workers: parseInt(v('--workers', String(Math.max(1, Math.min(12, availableParallelism() - 2)))), 10),
     qlevel: parseInt(v('--qlevel', String(QLEVEL_PADRAO)), 10),
+    geometria: v('--geometria', 'draco'),
     limite: v('--limite') ? parseInt(v('--limite'), 10) : null,
     forcar: a.includes('--forcar'),
     promover: a.includes('--promover'),
@@ -127,7 +128,7 @@ function inventaria(raiz) {
  * @returns {Promise<object>} totais da conversao
  */
 function converteTiles(ctx) {
-  const { raiz, tiles, db, workers, qlevel, log } = ctx;
+  const { raiz, tiles, db, workers, qlevel, geometria, log } = ctx;
   return new Promise((resolve, reject) => {
     const inserir = db.prepare('INSERT OR REPLACE INTO media (key, content) VALUES (?, ?)');
     const gravarLote = db.transaction((linhas) => {
@@ -164,7 +165,7 @@ function converteTiles(ctx) {
     };
 
     for (let i = 0; i < workers; i++) {
-      const w = new Worker(join(__dirname, 'converter-worker.js'), { workerData: { qlevel } });
+      const w = new Worker(join(__dirname, 'converter-worker.js'), { workerData: { qlevel, geometria } });
       vivos.add(w);
 
       w.on('message', (m) => {
@@ -349,8 +350,8 @@ async function main() {
   const token = `${Date.now().toString(36)}`;
   const importId = openImport(o.id, o.origem);
 
-  passo(`3. conversao (${o.workers} workers, qlevel=${o.qlevel}, ${ktxVersao})`);
-  const conv = await converteTiles({ raiz: o.origem, tiles, db, workers: o.workers, qlevel: o.qlevel, log });
+  passo(`3. conversao (${o.workers} workers, geometria=${o.geometria}, qlevel=${o.qlevel}, ${ktxVersao})`);
+  const conv = await converteTiles({ raiz: o.origem, tiles, db, workers: o.workers, qlevel: o.qlevel, geometria: o.geometria, log });
   const taxa = conv.convertidos / conv.segundos;
   log(`  ${conv.convertidos.toLocaleString('pt-BR')} tiles em ${conv.segundos.toFixed(1)} s (${taxa.toFixed(1)} tiles/s)`);
   log(`  texturas ${conv.texturas.toLocaleString('pt-BR')}   triangulos ${conv.triangulos.toLocaleString('pt-BR')}`);
@@ -432,7 +433,7 @@ async function main() {
     meta.run('id', o.id);
     meta.run('name', o.nome || o.id);
     meta.run('tilesVersion', '1.1');
-    meta.run('geometry', 'draco');
+    meta.run('geometry', o.geometria);
     meta.run('texture', 'ktx2-etc1s');
     meta.run('textureQuality', String(o.qlevel));
     meta.run('buildToken', token);
@@ -464,7 +465,7 @@ async function main() {
     source_version: null,
     captured_at: null,
     tiles_version: '1.1',
-    geometry_codec: 'draco',
+    geometry_codec: o.geometria,
     texture_codec: 'ktx2-etc1s',
     texture_quality: o.qlevel,
     tile_count: tiles.length,

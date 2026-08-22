@@ -93,6 +93,71 @@ LOD grosso e quase não pesam: 39,4% dos tiles carregam 10,3% dos bytes. Os que
 carregam o peso estão em 50 a 200 KiB, que é a faixa que o time do CesiumJS
 recomenda. O desenho está certo, e agrupar tiles não é a otimização a perseguir.
 
+## As opções do CesiumJS são a terceira camada, e a mais mal medida
+
+O `ebgeo_web` não usa os defaults do Cesium. O `map_3d.js:createOptimizedTileset`
+liga quinze opções, e **nenhuma delas tinha medida**:
+
+```js
+preferLeaves: false,            skipLevelOfDetail: true,
+baseScreenSpaceError: 1024,     skipScreenSpaceErrorFactor: 16,
+skipLevels: 1,                  cacheBytes: 1073741824,
+dynamicScreenSpaceError: true,  dynamicScreenSpaceErrorDensity: 0.00278,
+dynamicScreenSpaceErrorFactor: 2.0, dynamicScreenSpaceErrorHeightFalloff: 0.25,
+cullWithChildrenBounds: true,   cullRequestsWhileMoving: true,
+cullRequestsWhileMovingMultiplier: 60.0, foveatedScreenSpaceError: true,
+```
+
+**`skipLevelOfDetail: true` muda tudo, e por isso uma medida sem ele mente.**
+Medi o SSE duas vezes, e a diferença entre as duas foi só essa opção:
+
+| medida | SSE | tiles |
+|---|---|---|
+| sem as opções do EBGeo (Ponte de Quatis) | 2 | 6.076 |
+| **com** as opções do EBGeo (Silo) | 1 | **91** |
+
+O `skipLevelOfDetail` pula os níveis intermediários da árvore, então o SSE
+agressivo custa muito menos do que custaria sem ele. **A conclusão que eu tinha
+tirado antes, de que trocar o SSE renderia 33x, veio da medida sem as opções e
+está errada.** Com o conjunto real do EBGeo, no Silo:
+
+| SSE | tiles | VRAM |
+|---|---|---|
+| 1 (o que o config publica) | 91 | 40,3 MiB |
+| 16 | 8 | 1,1 MiB |
+
+Ainda é 11x em tiles e 37x em VRAM, mas com 8 tiles o modelo fica grosseiro: aqui
+a escolha é de qualidade e tem de ser julgada na tela, não na tabela.
+
+Quem usa SSE 1 hoje: **6 dos 97 tilesets do config de produção**, todos do DJI
+Terra (`esa`, `7bib`, `beira_rio`, `barragem_faxinal_soturno`,
+`silo_dona_francisca`, `expoex_2026`). Os outros 91 usam o default de 16.
+
+## Draco contra meshopt: o que fechou e o que não
+
+**Fechou, e é estável:**
+
+| | Draco | meshopt |
+|---|---|---|
+| disco (Silo, 1.554 tiles) | 338,3 MiB | **460,1 MiB** (+36,0%) |
+| VRAM de geometria | 19,9 MiB | **31,2 MiB** (+56,8%) |
+| VRAM de textura | 20,3 MiB | 20,3 MiB (igual) |
+| tiles e triângulos | 91 / 481.173 | 91 / 481.179 |
+| codec puro (Node) | 3,45 M vért/s | **16,19 M vért/s** |
+
+**Não fechou:** o tempo de carga no cliente. Quatro rodadas alternadas deram
+61,4 s e 81,5 s para Draco, e 19,7 s e **83,6 s** para meshopt. Duas medidas do
+mesmo parâmetro que discordam por 4x indicam defeito no instrumento, e este é
+conhecido: **com a aba em segundo plano o Chrome estrangula o `setTimeout`**, e o
+relógio de parede passa a medir o estrangulamento. Trocar para tempo de CPU
+dentro do `render()` também não resolve, porque o decode acontece num Web Worker,
+fora dele.
+
+**A medida que fecha isto é `bench/receita.html` com a aba em primeiro plano**,
+sem trocar de janela durante a corrida. Enquanto ela não for feita, a escolha do
+codec de geometria fica em aberto, e o Draco continua sendo o padrão por ser o
+menor.
+
 ## O gargalo provável não está aqui
 
 Levantado na pesquisa de fontes primárias, e é o achado que reordena a lista:

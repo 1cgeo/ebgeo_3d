@@ -187,3 +187,73 @@ async function rodaRoteiro(argv) {
     return { code: err.code ?? 1, saida: (err.stdout || '') + (err.stderr || '') };
   }
 }
+
+test('so um codec de geometria sai declarado', async () => {
+  // Ler um b3dm com Draco registra a extensao no Document, e ela SOBREVIVE a
+  // leitura. Sem descartar antes de escolher o codec, o arquivo saia declarando
+  // KHR_draco_mesh_compression E EXT_meshopt_compression, os dois como
+  // obrigatorios. O CesiumJS recusa em silencio: 13 tiles no tileset, 0 prontos,
+  // 0 pendentes, e nenhuma mensagem no console.
+  const { criarConversor } = await import('../scripts/lib/conversor.js');
+  const { abrirTile } = await import('../scripts/lib/b3dm.js');
+  void abrirTile;
+
+  // Draco e meshopt sao mutuamente EXCLUSIVOS: a mesma geometria nao se comprime
+  // por dois codecs. Ja o KHR_mesh_quantization ANDA COM o meshopt, que por
+  // especificacao opera sobre dados quantizados, entao os dois juntos sao o
+  // esperado e nao um defeito.
+  const EXCLUSIVOS = ['KHR_draco_mesh_compression', 'EXT_meshopt_compression'];
+  const GEOM = {
+    draco: ['KHR_draco_mesh_compression'],
+    meshopt: ['EXT_meshopt_compression', 'KHR_mesh_quantization'],
+    quantize: ['KHR_mesh_quantization'],
+  };
+  // Um glb minimo com uma malha: o suficiente para o codec ser aplicado.
+  const doc = glbComMalha();
+
+  for (const [modo, esperada] of Object.entries(GEOM)) {
+    const c = await criarConversor({ geometria: modo });
+    const r = await c.converte(doc);
+    c.fecha();
+    const tam = r.glb.readUInt32LE(12);
+    const j = JSON.parse(r.glb.subarray(20, 20 + tam).toString('utf-8'));
+    const req = j.extensionsRequired || [];
+    const exclusivos = EXCLUSIVOS.filter((g) => req.includes(g));
+    assert.ok(exclusivos.length <= 1,
+      `${modo} declarou ${JSON.stringify(exclusivos)}; Draco e meshopt juntos e arquivo invalido`);
+    for (const e of esperada) {
+      assert.ok(req.includes(e), `${modo} tem de declarar ${e}, e declarou ${JSON.stringify(req)}`);
+    }
+  }
+});
+
+/** glb com uma malha de dois triangulos, sem textura. */
+function glbComMalha() {
+  const pos = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]);
+  const idx = new Uint16Array([0, 1, 2, 1, 3, 2]);
+  const bin = Buffer.concat([Buffer.from(pos.buffer), Buffer.from(idx.buffer), Buffer.alloc(4)]);
+  const json = {
+    asset: { version: '2.0', generator: 'teste' },
+    scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 4, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] },
+      { bufferView: 1, componentType: 5123, count: 6, type: 'SCALAR' },
+    ],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: pos.byteLength },
+      { buffer: 0, byteOffset: pos.byteLength, byteLength: idx.byteLength },
+    ],
+    buffers: [{ byteLength: bin.length }],
+  };
+  let corpo = Buffer.from(JSON.stringify(json), 'utf-8');
+  const resto = corpo.length % 4;
+  if (resto) corpo = Buffer.concat([corpo, Buffer.alloc(4 - resto, 0x20)]);
+  const cab = Buffer.alloc(12);
+  cab.write('glTF', 0, 'ascii');
+  cab.writeUInt32LE(2, 4);
+  cab.writeUInt32LE(12 + 8 + corpo.length + 8 + bin.length, 8);
+  const cj = Buffer.alloc(8); cj.writeUInt32LE(corpo.length, 0); cj.write('JSON', 4, 'ascii');
+  const cb = Buffer.alloc(8); cb.writeUInt32LE(bin.length, 0); cb.write('BIN ', 4, 'ascii');
+  return Buffer.concat([cab, cj, corpo, cb, bin]);
+}

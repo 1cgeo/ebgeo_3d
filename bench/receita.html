@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Receita: A/B no cliente</title>
+<link rel="stylesheet" href="./cesium/Widgets/widgets.css">
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#eee;font:11px monospace;overflow:hidden}
+  #cesiumContainer{position:absolute;inset:0}
+  #hud{position:absolute;left:8px;top:8px;background:rgba(0,0,0,.85);padding:8px 12px;
+       border:1px solid #555;z-index:9;white-space:pre;line-height:1.45;max-height:94%;overflow:auto}
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<pre id="hud">iniciando...</pre>
+<script src="./cesium/Cesium.js"></script>
+<script>
+const L=[]; const hud=document.getElementById('hud');
+function log(s){ L.push(s); hud.textContent=L.join('\n'); }
+
+const BASE = 'http://127.0.0.1:8082/api/v1/models';
+// Silo Oreste Ceretta: o config de producao o publica com maximumScreenSpaceError 1.
+const ALVO = { lon:-53.376625948827005, lat:-29.658898151883154 };
+
+/**
+ * As opcoes que o ebgeo_web aplica hoje, em map_3d.js:createOptimizedTileset.
+ * Toda medida parte DAQUI, e nao dos defaults do Cesium: medir contra o default
+ * responderia uma pergunta que ninguem fez.
+ */
+const EBGEO = {
+  preferLeaves: false,
+  skipLevelOfDetail: true,
+  baseScreenSpaceError: 1024,
+  skipScreenSpaceErrorFactor: 16,
+  skipLevels: 1,
+  cacheBytes: 1073741824,
+  dynamicScreenSpaceError: true,
+  dynamicScreenSpaceErrorDensity: 0.00278,
+  dynamicScreenSpaceErrorFactor: 2.0,
+  dynamicScreenSpaceErrorHeightFalloff: 0.25,
+  cullWithChildrenBounds: true,
+  cullRequestsWhileMoving: true,
+  cullRequestsWhileMovingMultiplier: 60.0,
+  foveatedScreenSpaceError: true,
+};
+
+window.R = [];
+
+(async function(){
+  const viewer = new Cesium.Viewer('cesiumContainer', {
+    baseLayer:false, baseLayerPicker:false, geocoder:false, homeButton:false,
+    sceneModePicker:false, navigationHelpButton:false, animation:false,
+    timeline:false, infoBox:false, selectionIndicator:false, fullscreenButton:false
+  });
+  window.__viewer = viewer;
+  const sc = viewer.scene;
+  sc.globe.show = false; sc.skyBox.show = false; sc.skyAtmosphere.show = false;
+  sc.light = new Cesium.DirectionalLight({ direction: new Cesium.Cartesian3(0.35,-0.5,-0.8) });
+
+  log('CesiumJS '+Cesium.VERSION);
+
+  /**
+   * Mede um caso. `render()` explicito porque a aba fica em segundo plano
+   * durante a automacao, e ali o requestAnimationFrame e estrangulado: sem isto
+   * o Cesium nao seleciona nem pede tile nenhum, e a medida da zero.
+   */
+  window.mede = async function(rotulo, modelo, sse, extras, dist){
+    for (let i=sc.primitives.length-1;i>=0;i--){
+      const p=sc.primitives.get(i);
+      if (p instanceof Cesium.Cesium3DTileset) sc.primitives.remove(p);
+    }
+    sc.render();
+    const opcoes = Object.assign({}, EBGEO, extras || {}, { maximumScreenSpaceError: sse });
+    const t0 = performance.now();
+    const ts = await Cesium.Cesium3DTileset.fromUrl(`${BASE}/${modelo}/tileset.json`, opcoes);
+    sc.primitives.add(ts);
+
+    const centro = Cesium.Cartesian3.fromDegrees(ALVO.lon, ALVO.lat,
+      Cesium.Cartographic.fromCartesian(ts.boundingSphere.center).height);
+    sc.camera.lookAt(centro, new Cesium.HeadingPitchRange(
+      Cesium.Math.toRadians(25), Cesium.Math.toRadians(-32), dist));
+    sc.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+
+    let quieto=0, g=0, pico=0;
+    while (quieto < 12 && g < 1200) {
+      sc.render();
+      await new Promise(r=>setTimeout(r,15)); g++;
+      const st = ts.statistics;
+      pico = Math.max(pico, ts.totalMemoryUsageInBytes);
+      quieto = (st.numberOfPendingRequests === 0 && st.numberOfTilesWithContentReady > 0) ? quieto+1 : 0;
+    }
+    const ms = Math.round(performance.now() - t0);
+    const tf = performance.now(); let frames = 0;
+    while (performance.now() - tf < 1500) { sc.render(); frames++; }
+    const s = ts.statistics;
+    const e = {
+      caso: rotulo, modelo, sse,
+      tiles: s.numberOfTilesWithContentReady,
+      tri: s.numberOfTrianglesSelected,
+      vram: +(ts.totalMemoryUsageInBytes/1048576).toFixed(1),
+      tex: +(s.texturesByteLength/1048576).toFixed(1),
+      geo: +(s.geometryByteLength/1048576).toFixed(1),
+      ms, fps: Math.round(frames/((performance.now()-tf)/1000)),
+    };
+    window.R.push(e);
+    log(rotulo.padEnd(30)+' sse'+String(sse).padStart(3)
+      +'  tiles'+String(e.tiles).padStart(6)
+      +'  tri'+String(e.tri).padStart(9)
+      +'  VRAM'+String(e.vram).padStart(7)
+      +'  geo'+String(e.geo).padStart(6)
+      +'  ms'+String(e.ms).padStart(7)
+      +'  fps'+String(e.fps).padStart(5));
+    return e;
+  };
+
+  log('pronto. use mede(rotulo, modelo, sse, extras, dist)');
+  log('');
+  log('ABRA ESTA PAGINA EM PRIMEIRO PLANO e nao troque de aba durante a medida.');
+  log('Com a aba escondida o Chrome estrangula o setTimeout, e o relogio de');
+  log('parede passa a medir o estrangulamento: a MESMA variante deu 19,7 s numa');
+  log('rodada e 83,6 s na seguinte. O tempo de decode vive num Web Worker, entao');
+  log('nem o tempo de render() o captura. So a aba ativa mede o que o usuario ve.');
+  document.title = 'Receita - PRONTO';
+})().catch(e=>{ log('FALHA: '+e.stack); document.title='Receita - ERRO'; });
+</script>
+</body>
+</html>

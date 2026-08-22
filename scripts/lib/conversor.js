@@ -17,8 +17,9 @@
  */
 
 import { NodeIO } from '@gltf-transform/core';
-import { ALL_EXTENSIONS, KHRTextureBasisu, KHRDracoMeshCompression } from '@gltf-transform/extensions';
+import { ALL_EXTENSIONS, KHRTextureBasisu, KHRDracoMeshCompression, EXTMeshoptCompression, KHRMeshQuantization } from '@gltf-transform/extensions';
 import draco3d from 'draco3dgltf';
+import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import { abrirTile, leGerador } from './b3dm.js';
 import { paraKTX2, abrirTemporario, fecharTemporario, QLEVEL_PADRAO } from './ktx2.js';
 
@@ -41,12 +42,14 @@ import { paraKTX2, abrirTemporario, fecharTemporario, QLEVEL_PADRAO } from './kt
  * Monta um conversor. Caro: chame uma vez por worker.
  * @returns {Promise<Conversor>}
  */
-export async function criarConversor() {
+export async function criarConversor({ geometria = 'draco' } = {}) {
   const io = new NodeIO()
     .registerExtensions(ALL_EXTENSIONS)
     .registerDependencies({
       'draco3d.decoder': await draco3d.createDecoderModule(),
       'draco3d.encoder': await draco3d.createEncoderModule(),
+      'meshopt.decoder': MeshoptDecoder,
+      'meshopt.encoder': MeshoptEncoder,
     });
 
   const tmp = abrirTemporario();
@@ -77,9 +80,34 @@ export async function criarConversor() {
       // faria um cliente conforme recusar um arquivo que esta perfeito.
       if (texturas === 0) basisu.dispose();
 
-      doc.createExtension(KHRDracoMeshCompression)
-        .setRequired(true)
-        .setEncoderOptions({ method: KHRDracoMeshCompression.EncoderMethod.EDGEBREAKER });
+      // A EXTENSAO DE GEOMETRIA DA ORIGEM SAI PRIMEIRO. Ler um b3dm com Draco
+      // registra KHR_draco_mesh_compression no Document, e ela SOBREVIVE a
+      // leitura mesmo que a saida use outro codec: o arquivo saia declarando
+      // Draco e meshopt ao mesmo tempo, os dois como obrigatorios, e o CesiumJS
+      // recusa em silencio (13 tiles no tileset, 0 prontos, 0 pendentes).
+      for (const ext of doc.getRoot().listExtensionsUsed()) {
+        const nome = ext.extensionName;
+        if (nome === 'KHR_draco_mesh_compression'
+          || nome === 'EXT_meshopt_compression'
+          || nome === 'KHR_mesh_quantization') ext.dispose();
+      }
+
+      // A COMPRESSAO DE GEOMETRIA E CONFIGURAVEL PORQUE A ESCOLHA E MEDIDA, e a
+      // medida depende do cliente: o CesiumJS decodifica Draco numa thread so.
+      // Ver docs/desempenho.md.
+      if (geometria === 'draco') {
+        doc.createExtension(KHRDracoMeshCompression)
+          .setRequired(true)
+          .setEncoderOptions({ method: KHRDracoMeshCompression.EncoderMethod.EDGEBREAKER });
+      } else if (geometria === 'meshopt') {
+        // meshopt exige quantizacao: ele comprime bufferView otimizado para GPU.
+        doc.createExtension(KHRMeshQuantization).setRequired(true);
+        doc.createExtension(EXTMeshoptCompression)
+          .setRequired(true)
+          .setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE });
+      } else if (geometria === 'quantize') {
+        doc.createExtension(KHRMeshQuantization).setRequired(true);
+      }
 
       let triangulos = 0;
       for (const malha of doc.getRoot().listMeshes()) {
