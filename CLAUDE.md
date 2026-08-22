@@ -179,6 +179,17 @@ que custou trabalho.
   de render manual a câmera nunca chega: medido, dão 3 tiles, 0 triângulo e tela
   preta. Use `camera.setView` com a posição calculada, e ortogonalize o `up`
   contra a `direction`, senão o Cesium gira a cena.
+- **A extensão de textura da ORIGEM não sai sozinha.** A estátua do acervo traz
+  `EXT_texture_webp` como REQUIRED, e depois de a imagem virar KTX2 o arquivo
+  saía declarando webp E basisu, os dois obrigatórios, sem nenhuma textura webp
+  dentro. É a irmã exata do caso Draco-mais-meshopt. O
+  `descartaExtensoesDeTexturaAntigas` a remove, **e só quando `texturas > 0`**:
+  textura que não converteu continua sendo webp.
+- **Teste que depende do binário `ktx` mede a instalação, e não o código.** O
+  `KTX_BIN` vem do `.env`, e o `npm test` NÃO carrega `.env`. Um teste meu
+  convertia um glb de verdade e falhava sempre com `texturas: 0, falhas: 1`,
+  acusando o conversor por um binário ausente. O conserto foi extrair a lógica
+  para função pura e testá-la com um `Document` do glTF-Transform.
 - **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
   o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
   No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e

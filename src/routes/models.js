@@ -48,11 +48,15 @@ function previa(id, extensao) {
  * @returns {object}
  */
 function paraCatalogo(m, base) {
-  const url = `${base}/api/v1/models/${m.id}/tileset.json`;
+  // O TIPO DECIDE O ARQUIVO E O CARREGADOR DO CLIENTE. O 3dtiles abre por
+  // `Cesium3DTileset.fromUrl` e aponta o tileset.json; o glb abre por
+  // `Model.fromGltfAsync` e aponta o proprio arquivo, sempre com o mesmo nome.
+  const glb = m.model_type === 'glb';
+  const url = `${base}/api/v1/models/${m.id}/${glb ? 'model.glb' : 'tileset.json'}`;
   const saida = {
     id: m.id,
     name: m.name,
-    type: '3dtiles',
+    type: glb ? 'glb' : '3dtiles',
     url,
     description: m.description ?? undefined,
     local: m.local ?? undefined,
@@ -70,6 +74,22 @@ function paraCatalogo(m, base) {
   }
   if (m.lon != null && m.lat != null) {
     saida.locate = { lon: m.lon, lat: m.lat, height: m.height ?? 1000 };
+  }
+
+  // ONDE PLANTAR, so no modelo glb. Sem `position` o Cesium o poe no centro da
+  // Terra, entao o campo sai mesmo que os outros faltem.
+  if (glb) {
+    if (m.position_lon != null && m.position_lat != null) {
+      saida.position = { lon: m.position_lon, lat: m.position_lat };
+    }
+    const rot = {};
+    if (m.rot_heading != null) rot.heading = m.rot_heading;
+    if (m.rot_pitch != null) rot.pitch = m.rot_pitch;
+    if (m.rot_roll != null) rot.roll = m.rot_roll;
+    if (Object.keys(rot).length) saida.rotation = rot;
+    // Escala 1 nao se publica: e o default do cliente, e emiti-la convidaria a
+    // tratar o default como decisao do modelo.
+    if (m.scale != null && m.scale !== 1) saida.scale = m.scale;
   }
   // So publica o parametro quando ele foge do padrao do Cesium (16). Emitir 16
   // em toda entrada convidaria a tratar o default como decisao do modelo.

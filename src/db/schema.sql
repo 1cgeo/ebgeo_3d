@@ -60,7 +60,27 @@ CREATE TABLE IF NOT EXISTS models (
     min_height      REAL,
 
     -- Ajuste vertical publicado ao cliente. Com o terreno da DGEO no ar ele e 0.
+    -- No modelo GLB ele NAO e ajuste: e a altura em que o modelo e plantado.
     height_offset   REAL DEFAULT 0,
+
+    -- ===== modelo GLB solto (model_type = 'glb') =====
+    -- '3dtiles' (o padrao) ou 'glb'. O segundo e um arquivo unico, sem arvore e
+    -- sem tileset.json, que o Cesium carrega por Model.fromGltfAsync.
+    model_type      TEXT NOT NULL DEFAULT '3dtiles',
+
+    -- ONDE PLANTAR. Um .glb comum traz coordenada LOCAL, e nao georreferencia:
+    -- sem estes dois campos ele cai no centro da Terra. Eles vem do operador na
+    -- importacao, e nao ha como medi-los do arquivo.
+    position_lon    REAL,
+    position_lat    REAL,
+
+    -- Orientacao em graus, no referencial local do ponto.
+    rot_heading     REAL,
+    rot_pitch       REAL,
+    rot_roll        REAL,
+
+    -- Fator de escala uniforme. NULL significa 1.
+    scale           REAL,
     max_sse         REAL,            -- maximumScreenSpaceError sugerido
 
     -- ===== catalogo =====

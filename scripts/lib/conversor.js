@@ -39,6 +39,44 @@ import { paraKTX2, abrirTemporario, fecharTemporario, QLEVEL_PADRAO } from './kt
  */
 
 /**
+ * Extensoes que descrevem o CODEC DA TEXTURA na origem, e que deixam de valer
+ * quando toda imagem vira KTX2.
+ */
+export const EXTENSOES_DE_TEXTURA = ['EXT_texture_webp', 'EXT_texture_avif'];
+
+/**
+ * Descarta a extensao de textura da ORIGEM quando a textura mudou de codec.
+ *
+ * O DEFEITO QUE ISTO CONSERTA. A estatua do acervo traz `EXT_texture_webp` como
+ * REQUIRED. Depois de toda imagem virar KTX2, o arquivo saia declarando webp E
+ * basisu, os dois OBRIGATORIOS, sem nenhuma textura webp dentro. Uma extensao
+ * obrigatoria que o cliente nao implementa faz o carregador RECUSAR o arquivo;
+ * a que ele implementa manda procurar uma imagem que nao existe.
+ *
+ * E a irma exata do caso Draco-mais-meshopt, que ja custou 13 tiles com 0
+ * prontos e 0 pendentes, sem erro no console.
+ *
+ * O DESCARTE SO ACONTECE COM `texturas > 0`. Textura que NAO converteu continua
+ * sendo webp, e tirar a declaracao dela deixaria o arquivo mentindo no outro
+ * sentido. Este e o caminho real quando o binario `ktx` falha num tile.
+ *
+ * @param {import('@gltf-transform/core').Document} doc
+ * @param {number} texturas - quantas imagens viraram KTX2 nesta conversao
+ * @returns {string[]} os nomes descartados
+ */
+export function descartaExtensoesDeTexturaAntigas(doc, texturas) {
+  if (!(texturas > 0)) return [];
+  const fora = [];
+  for (const ext of doc.getRoot().listExtensionsUsed()) {
+    if (EXTENSOES_DE_TEXTURA.includes(ext.extensionName)) {
+      fora.push(ext.extensionName);
+      ext.dispose();
+    }
+  }
+  return fora;
+}
+
+/**
  * Monta um conversor. Caro: chame uma vez por worker.
  * @returns {Promise<Conversor>}
  */
@@ -100,6 +138,8 @@ export async function criarConversor({ geometria = 'draco', upAxis = 'Y', maxTex
       // Declarar KHR_texture_basisu como REQUIRED sem nenhuma textura KTX2
       // faria um cliente conforme recusar um arquivo que esta perfeito.
       if (texturas === 0) basisu.dispose();
+
+      descartaExtensoesDeTexturaAntigas(doc, texturas);
 
       // A EXTENSAO DE GEOMETRIA DA ORIGEM SAI PRIMEIRO. Ler um b3dm com Draco
       // registra KHR_draco_mesh_compression no Document, e ela SOBREVIVE a

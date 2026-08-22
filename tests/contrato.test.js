@@ -369,3 +369,4 @@ test('o offset sem terreno usa a BASE, e nao a mediana do chao', () => {
     'pela mediana o modelo afunda: e este o caso que o teste guarda');
   assert.equal(+(envelope.hMin + offsetErrado).toFixed(1), -22.8);
 });
+

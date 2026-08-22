@@ -252,6 +252,33 @@ node scripts/remedir.js silo-dona-francisca
 O roteiro imprime a distância entre o ponto do catálogo e o medido. Acima de 50 m
 ele marca `DESLOCADO`.
 
+## Importar um modelo GLB solto
+
+Arquivo único, sem árvore e sem `tileset.json`. O CesiumJS o carrega por
+`Model.fromGltfAsync`, e não por `Cesium3DTileset.fromUrl`.
+
+```bash
+node scripts/importar-glb.js --origem "$EBGEO3D_SOURCE_DIR/estatua" --id estatua   --nome "Estátua" --lon -44.447668 --lat -22.454757 --altura 50 --heading 180
+```
+
+**`--lon` e `--lat` são OBRIGATÓRIOS, e o roteiro recusa sem eles.** Um `.glb`
+comum traz coordenada LOCAL, e não georreferência: sem esses dois valores o
+Cesium planta o modelo no centro da Terra. Não há como medir isso do arquivo, e
+por isso o portão vem ANTES da conversão.
+
+O arquivo é servido sempre como `model.glb`, qualquer que fosse o nome na
+origem. Assim o cliente monta a URL sem consultar mais nada.
+
+### O GLB pode CRESCER na conversão, e isso não é defeito
+
+Medido na estátua do acervo: 616 KiB viraram 983 KiB, porque a textura de
+2048×2048 estava em WebP com perda (504 KiB) e virou KTX2/ETC1S (871 KiB). A
+geometria não mudou, porque já estava em Draco.
+
+A troca é a mesma do teto de textura: **KTX2 compra VRAM, e não disco**. O WebP
+tem de ser decodificado para RGBA na GPU (2048² × 4 = 16 MiB); o ETC1S
+transcodifica direto para BC1 (cerca de 2,8 MiB com a cadeia de mip).
+
 ## Teto de resolução de textura
 
 `--max-textura 512` reduz o lado maior de toda textura acima do teto, mantendo a

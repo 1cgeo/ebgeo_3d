@@ -61,6 +61,13 @@ export function getIndexDb() {
 const COLUNAS_NOVAS = [
   ['ground_height', 'REAL'],
   ['min_height', 'REAL'],
+  ['model_type', "TEXT NOT NULL DEFAULT '3dtiles'"],
+  ['position_lon', 'REAL'],
+  ['position_lat', 'REAL'],
+  ['rot_heading', 'REAL'],
+  ['rot_pitch', 'REAL'],
+  ['rot_roll', 'REAL'],
+  ['scale', 'REAL'],
 ];
 
 /** Adiciona as colunas que faltam ao catalogo, sem tocar nos dados. */

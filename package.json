@@ -17,7 +17,10 @@
     "knip": "knip",
     "bench": "node --expose-gc bench/banco.js",
     "bench:http": "node bench/http.js",
-    "bench:cliente": "node bench/cliente.js"
+    "bench:cliente": "node bench/cliente.js",
+    "importar:glb": "node --env-file-if-exists=.env scripts/importar-glb.js",
+    "metadados": "node --env-file-if-exists=.env scripts/metadados.js",
+    "remedir": "node --env-file-if-exists=.env scripts/remedir.js"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",

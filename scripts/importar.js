@@ -49,6 +49,7 @@ import {
 import {
   tipoDeTile, abrirTile, leGerador, extensoesNaoSuportadas,
 } from './lib/b3dm.js';
+import { trocaArquivo } from './lib/deposito.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -608,53 +609,6 @@ async function main() {
   closeAll();
 }
 
-/**
- * Troca o arquivo publicado pelo recem-construido.
- *
- * AQUI MORA A UNICA DIFERENCA DE PLATAFORMA DESTE ROTEIRO. No Linux, que e onde
- * o container roda, substituir um arquivo com handle aberto e permitido: o inode
- * antigo sobrevive ate o ultimo leitor fechar, e o servico troca sozinho na
- * proxima conferencia de mtime. No Windows o mesmo passo devolve EBUSY, porque
- * um handle aberto SEGURA o arquivo, e o `closeModelDb` daqui so fecha a conexao
- * DESTE processo: o servico e outro.
- *
- * Quando isso acontece, o trabalho NAO se perde. O `.parcial` esta pronto e
- * conferido, e `--promover` termina a importacao a partir dele.
- *
- * @returns {number} bytes do arquivo publicado
- */
-function trocaArquivo({ temporario, destino, dbFilename, importId, conv, log }) {
-  closeModelDb(dbFilename);
-  try {
-    for (const f of [destino, `${destino}-wal`, `${destino}-shm`]) {
-      if (existsSync(f)) unlinkSync(f);
-    }
-    renameSync(temporario, destino);
-  } catch (err) {
-    if (!['EBUSY', 'EPERM', 'EACCES'].includes(err.code)) throw err;
-    console.error(`\n=== PARADO no passo 6: o arquivo publicado esta em uso (${err.code}) ===`);
-    console.error('A conversao terminou e passou na conferencia. Nada se perdeu.');
-    console.error('No Windows o servico no ar segura o arquivo, e ele e outro processo.');
-    console.error('\nPare o servico e rode:');
-    console.error(`  node scripts/importar.js --promover --id ${dbFilename.replace(/\.3dtiles$/, '')}`);
-    closeImport({
-      id: importId,
-      finished_at: new Date().toISOString(),
-      status: 'falhou',
-      tiles_in: conv.tentados,
-      tiles_out: conv.convertidos,
-      textures: conv.texturas,
-      failures: conv.falhasTextura,
-      seconds: conv.segundos,
-      ratio: null,
-      notes: `troca do arquivo bloqueada (${err.code}); .parcial pronto para --promover`,
-    });
-    closeAll();
-    process.exit(6);
-  }
-  log(`  ${dbFilename} publicado`);
-  return statSync(destino).size;
-}
 
 /**
  * Termina uma importacao a partir do `.parcial` que ficou pronto.

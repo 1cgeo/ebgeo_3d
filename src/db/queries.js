@@ -28,7 +28,8 @@ function stmts() {
       SELECT id, name, source, captured_at, tiles_version, geometry_codec,
              texture_codec, texture_quality, tile_count, total_bytes,
              build_token, built_at, lon, lat, height, ground_height, min_height,
-             height_offset, max_sse, description, local, keywords, preview_video, preview_thumb
+             height_offset, max_sse, model_type, position_lon, position_lat,
+             rot_heading, rot_pitch, rot_roll, scale, description, local, keywords, preview_video, preview_thumb
         FROM models
        WHERE published = 1
        ORDER BY name
@@ -43,13 +44,15 @@ function stmts() {
         tiles_version, geometry_codec, texture_codec, texture_quality,
         tile_count, json_count, total_bytes, source_bytes,
         build_token, built_at, lon, lat, height, ground_height, min_height,
-        height_offset, max_sse, description, local, keywords, preview_video, preview_thumb, published
+        height_offset, max_sse, model_type, position_lon, position_lat,
+        rot_heading, rot_pitch, rot_roll, scale, description, local, keywords, preview_video, preview_thumb, published
       ) VALUES (
         @id, @name, @db_filename, @source, @source_version, @captured_at,
         @tiles_version, @geometry_codec, @texture_codec, @texture_quality,
         @tile_count, @json_count, @total_bytes, @source_bytes,
         @build_token, @built_at, @lon, @lat, @height, @ground_height, @min_height,
-        @height_offset, @max_sse,
+        @height_offset, @max_sse, @model_type, @position_lon, @position_lat,
+        @rot_heading, @rot_pitch, @rot_roll, @scale,
         @description, @local, @keywords, @preview_video, @preview_thumb, @published
       )
       ON CONFLICT(id) DO UPDATE SET
@@ -74,6 +77,15 @@ function stmts() {
         min_height=excluded.min_height,
         height_offset=COALESCE(excluded.height_offset, models.height_offset),
         max_sse=COALESCE(excluded.max_sse, models.max_sse),
+        model_type=excluded.model_type,
+        -- Posicao e orientacao do GLB sao EDICAO do operador, e nao medida:
+        -- COALESCE as preserva numa reimportacao que nao as informe.
+        position_lon=COALESCE(excluded.position_lon, models.position_lon),
+        position_lat=COALESCE(excluded.position_lat, models.position_lat),
+        rot_heading=COALESCE(excluded.rot_heading, models.rot_heading),
+        rot_pitch=COALESCE(excluded.rot_pitch, models.rot_pitch),
+        rot_roll=COALESCE(excluded.rot_roll, models.rot_roll),
+        scale=COALESCE(excluded.scale, models.scale),
         description=COALESCE(excluded.description, models.description),
         local=COALESCE(excluded.local, models.local),
         keywords=COALESCE(excluded.keywords, models.keywords),

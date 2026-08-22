@@ -9,6 +9,7 @@ import {
   abrirTile, tipoDeTile, leGerador, extensoesNaoSuportadas, EXTENSOES_NAO_SUPORTADAS,
 } from '../scripts/lib/b3dm.js';
 import { dimensaoAlvo } from '../scripts/lib/ktx2.js';
+import { descartaExtensoesDeTexturaAntigas } from '../scripts/lib/conversor.js';
 import {
   reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE, MAX_TEXTURA,
 } from '../scripts/lib/tileset.js';
@@ -382,4 +383,56 @@ test('entrada estranha devolve lista vazia, e nao estoura', () => {
 test('a lista de nao suportadas cobre as duas extensoes do splat', () => {
   assert.ok(EXTENSOES_NAO_SUPORTADAS.includes('KHR_gaussian_splatting'));
   assert.ok(EXTENSOES_NAO_SUPORTADAS.includes('KHR_gaussian_splatting_compression_spz_2'));
+});
+
+/* ===================================================================== */
+/* descartaExtensoesDeTexturaAntigas                                     */
+/* ===================================================================== */
+
+/**
+ * Um Document mínimo com a extensão de textura da origem registrada.
+ *
+ * NÃO DEPENDE DO BINARIO `ktx`. A primeira versão deste teste convertia um glb
+ * de verdade, e falhava sempre: o `KTX_BIN` vem do `.env`, e o `npm test` não
+ * carrega `.env`. A conversão devolvia `texturas: 0` e `falhas: 1`, e o teste
+ * acusava o conversor por um binário ausente. Teste que depende de ferramenta
+ * externa mede a instalação, e não o código.
+ */
+async function docComExtensao(nome) {
+  const { Document } = await import('@gltf-transform/core');
+  const { EXTTextureWebP, KHRDracoMeshCompression } = await import('@gltf-transform/extensions');
+  const doc = new Document();
+  const classe = nome === 'EXT_texture_webp' ? EXTTextureWebP : KHRDracoMeshCompression;
+  doc.createExtension(classe).setRequired(true);
+  return doc;
+}
+
+test('a extensao de textura da ORIGEM sai quando a textura mudou de codec', async () => {
+  // O DEFEITO: a estatua do acervo traz `EXT_texture_webp` como REQUIRED, e
+  // depois de a imagem virar KTX2 o arquivo saia declarando webp E basisu, os
+  // dois OBRIGATORIOS, sem nenhuma textura webp dentro. Uma extensao
+  // obrigatoria que o cliente nao implementa faz o carregador RECUSAR o
+  // arquivo. Irma exata do caso Draco-mais-meshopt.
+  const doc = await docComExtensao('EXT_texture_webp');
+  const fora = descartaExtensoesDeTexturaAntigas(doc, 1);
+
+  assert.deepEqual(fora, ['EXT_texture_webp']);
+  const restantes = doc.getRoot().listExtensionsUsed().map((e) => e.extensionName);
+  assert.ok(!restantes.includes('EXT_texture_webp'), `sobrou: ${restantes.join(', ')}`);
+});
+
+test('a extensao FICA quando nenhuma textura converteu', async () => {
+  // Caminho real: o binario `ktx` falha num tile, a imagem continua sendo webp,
+  // e tirar a declaracao deixaria o arquivo mentindo no outro sentido.
+  const doc = await docComExtensao('EXT_texture_webp');
+  assert.deepEqual(descartaExtensoesDeTexturaAntigas(doc, 0), []);
+  const restantes = doc.getRoot().listExtensionsUsed().map((e) => e.extensionName);
+  assert.ok(restantes.includes('EXT_texture_webp'), 'a declaracao tem de ficar');
+});
+
+test('o descarte NAO toca extensao que nao e de textura', async () => {
+  const doc = await docComExtensao('KHR_draco_mesh_compression');
+  assert.deepEqual(descartaExtensoesDeTexturaAntigas(doc, 1), []);
+  const restantes = doc.getRoot().listExtensionsUsed().map((e) => e.extensionName);
+  assert.ok(restantes.includes('KHR_draco_mesh_compression'));
 });

@@ -55,6 +55,8 @@ before(async () => {
     texture_quality: 200, tile_count: 1, json_count: 1, total_bytes: 999,
     source_bytes: 900, build_token: 'tok1', built_at: '2026-08-22T00:00:00Z',
     lon: -44.29, lat: -22.40, height: 800, ground_height: 343.2, min_height: 292.6, height_offset: 0, max_sse: null,
+    model_type: '3dtiles', position_lon: null, position_lat: null,
+    rot_heading: null, rot_pitch: null, rot_roll: null, scale: null,
     description: null, local: null, keywords: '["ponte"]',
     preview_video: null, preview_thumb: null, published: 1,
   });
@@ -65,6 +67,8 @@ before(async () => {
     texture_quality: 200, tile_count: 1, json_count: 1, total_bytes: 1,
     source_bytes: 1, build_token: 'tok1', built_at: '2026-08-22T00:00:00Z',
     lon: null, lat: null, height: null, ground_height: null, min_height: null, height_offset: null, max_sse: null,
+    model_type: '3dtiles', position_lon: null, position_lat: null,
+    rot_heading: null, rot_pitch: null, rot_roll: null, scale: null,
     description: null, local: null, keywords: null,
     preview_video: null, preview_thumb: null, published: 0,
   });
