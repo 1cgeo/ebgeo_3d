@@ -214,9 +214,65 @@ Ela preenche só o que consegue medir. Ficam nulos e entram por `UPDATE` no
 `captured_at`, `preview_video` e `preview_thumb`. O `upsert` da reimportação
 preserva o que você editou, então a edição não se perde.
 
-O `locate.height` do catálogo é a altura média do modelo mais 500 m, que é a
-distância de câmera para o modelo caber na tela. Modelo cujo tileset publica só
-`boundingVolume.box` não tem ponto de navegação, e a importação avisa.
+O `locate.height` do catálogo é a altura do chão mais 500 m, que é a distância de
+câmera para o modelo caber na tela.
+
+## O ponto de navegação e a altura do chão
+
+A importação mede os dois, e nenhum dos dois se preenche a mão.
+
+Ela tenta primeiro o que o tileset declara: `properties.Longitude/Latitude`, que
+o Metashape grava em RADIANOS, ou `boundingVolume.region`. O DJI Terra não
+publica nenhum dos dois, só `boundingVolume.box`. Nesse caso a importação percorre
+a árvore inteira e mede o envelope geodésico.
+
+O cuidado que faz a conta valer está no código: o box de um tile é local ao
+`transform` acumulado, e não ECEF. O `transform` mora no root do tileset EXTERNO.
+Ler o box direto põe o modelo no golfo da Guiné.
+
+Duas colunas saem daí:
+
+- `lon`, `lat`, `height`: o ponto de navegação.
+- `ground_height`: a altura elipsoidal do chão, a mediana das alturas dos cantos
+  dos tiles de conteúdo. Ela é DADO, e a reimportação a sobrescreve.
+
+Modelo importado antes de 2026-08-22 tem o ponto errado ou vazio. Refaça a medida
+sem reconverter:
+
+```bash
+node scripts/remedir.js --dry-run          # mostra o deslocamento de cada modelo
+node scripts/remedir.js                    # grava
+node scripts/remedir.js silo-dona-francisca
+```
+
+O roteiro imprime a distância entre o ponto do catálogo e o medido. Acima de 50 m
+ele marca `DESLOCADO`.
+
+## Modelo que flutua
+
+O sintoma é o modelo pairando sobre um chão liso. A causa quase nunca é o modelo.
+
+Um CesiumJS que não consegue carregar o terreno cai EM SILÊNCIO para o
+`EllipsoidTerrainProvider`. O chão vira uma superfície lisa na altura 0, e todo
+modelo passa a flutuar a própria altura elipsoidal. Confira o terreno antes de
+mexer no modelo:
+
+```bash
+curl -o /dev/null -s -w "%{http_code}
+" http://localhost/terrain/tilesets/terrain/layer.json
+```
+
+Código `000` ou `404` confirma o diagnóstico. Com o terreno da DGEO no ar, o
+`height_offset` é 0, e é assim que o catálogo o publica.
+
+Na máquina sem terreno, gere o config com o contorno em vez de ajustar no olho:
+
+```bash
+node scripts/catalogo.js --js --sem-terreno --base http://localhost:8082
+```
+
+A opção publica `heightOffset = -ground_height`. NUNCA a use para o config de
+produção.
 
 ## Publicar e despublicar
 

@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS models (
     lon             REAL,
     lat             REAL,
     height          REAL,
+
+    -- Altura elipsoidal do CHAO do modelo, medida pelo envelope geodesico na
+    -- importacao (mediana das alturas dos cantos dos tiles de conteudo).
+    -- E dado, nao ajuste: nao se edita a mao. Serve para duas coisas.
+    --   1. Um cliente SEM terreno ve o modelo flutuar exatamente esta altura,
+    --      e o contorno e publicar heightOffset = -ground_height.
+    --   2. Um `height_offset` que nao seja 0 nem -ground_height denuncia
+    --      ajuste no olho, que e o que poe modelo enterrado.
+    ground_height   REAL,
+
+    -- Ajuste vertical publicado ao cliente. Com o terreno da DGEO no ar ele e 0.
     height_offset   REAL DEFAULT 0,
     max_sse         REAL,            -- maximumScreenSpaceError sugerido
 

@@ -6,8 +6,15 @@
  * ebgeo_web, ou a tabela do acervo.
  *
  * Uso:
- *   node scripts/catalogo.js                      # tabela
+ *   node scripts/catalogo.js                       # tabela
  *   node scripts/catalogo.js --js --base /ebgeo_3d  # trecho para o config.js
+ *   node scripts/catalogo.js --js --sem-terreno     # idem, para cliente sem terreno
+ *
+ * `--sem-terreno` publica heightOffset = -ground_height em vez do valor do
+ * catalogo. Um Cesium que nao consegue carregar o terreno cai EM SILENCIO para
+ * o EllipsoidTerrainProvider: o chao vira liso na altura 0 e todo modelo passa
+ * a flutuar a propria altura elipsoidal. Use so na maquina que esta nesse
+ * estado, e NUNCA para gerar o config de producao.
  */
 
 import { listModels, getTotals } from '../src/db/queries.js';
@@ -16,7 +23,11 @@ import { getIndexDb, closeAll } from '../src/db/connection.js';
 function args() {
   const a = process.argv.slice(2);
   const v = (n, p) => { const i = a.indexOf(n); return i >= 0 && a[i + 1] ? a[i + 1] : p; };
-  return { js: a.includes('--js'), base: v('--base', '/ebgeo_3d').replace(/\/+$/, '') };
+  return {
+    js: a.includes('--js'),
+    semTerreno: a.includes('--sem-terreno'),
+    base: v('--base', '/ebgeo_3d').replace(/\/+$/, ''),
+  };
 }
 
 const o = args();
@@ -29,8 +40,11 @@ if (o.js) {
       url: `${o.base}/api/v1/models/${m.id}/tileset.json`,
       id: m.id,
       name: m.name,
-      heightOffset: m.height_offset ?? 0,
+      heightOffset: (o.semTerreno && m.ground_height != null)
+        ? -Number(m.ground_height.toFixed(1))
+        : (m.height_offset ?? 0),
     };
+    if (m.ground_height != null) e.groundHeight = +m.ground_height.toFixed(1);
     if (m.description) e.description = m.description;
     if (m.local) e.local = m.local;
     if (m.captured_at) e.data_captura = m.captured_at;
@@ -39,7 +53,8 @@ if (o.js) {
     if (m.max_sse != null && m.max_sse !== 16) e.maximumScreenSpaceError = m.max_sse;
     return e;
   });
-  console.log('// gerado por scripts/catalogo.js --js');
+  console.log('// gerado por scripts/catalogo.js --js'
+    + (o.semTerreno ? ' --sem-terreno (heightOffset = -ground_height)' : ''));
   console.log(`tilesets: ${JSON.stringify(entradas, null, 2)},`);
 } else {
   const { bytes, tiles } = getTotals();
@@ -50,7 +65,8 @@ if (o.js) {
       + `${(m.total_bytes / 2 ** 20).toFixed(1).padStart(9)} `
       + `${`${m.geometry_codec}+${m.texture_codec}`.padEnd(18)} `
       + `${(m.build_token || '').padEnd(10)} `
-      + `${m.lon != null ? `${m.lon.toFixed(4)},${m.lat.toFixed(4)}` : 'SEM PONTO'}`,
+      + `${m.lon != null ? `${m.lon.toFixed(4)},${m.lat.toFixed(4)}` : 'SEM PONTO'}`
+      + `${m.ground_height != null ? ` chao ${m.ground_height.toFixed(1)} m` : ''}`,
     );
   }
   console.log(`\n${modelos.length} modelos, ${tiles.toLocaleString('pt-BR')} tiles, ${(bytes / 2 ** 30).toFixed(2)} GiB`);

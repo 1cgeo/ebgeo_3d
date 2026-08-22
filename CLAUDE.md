@@ -74,9 +74,9 @@ scripts/
 
 ## Documentação
 
-- `docs/formato.md` — o padrão e a medida que sustenta cada escolha
-- `docs/operacao.md` — runbook da importação
-- `docs/api.md` — contrato das rotas
+- `docs/formato.md`: o padrão e a medida que sustenta cada escolha
+- `docs/operacao.md`: runbook da importação
+- `docs/api.md`: contrato das rotas
 
 ## O que não mudar sem medir de novo
 
@@ -95,7 +95,7 @@ que custou trabalho.
   otimização que nunca aconteceu. O teste confere o valor efetivo.
 - **`DELETE` no fecho.** Em WAL o SQLite cria o `-shm` ao abrir, e num volume
   `:ro` isso derruba o serviço com erro que não aponta a causa.
-- **Draco, e não meshopt.** Empatam no Cesium com carga paralela; o meshopt custa
+- **Draco, e não meshopt.** Empatam no Cesium com carga paralela. O meshopt custa
   17% a mais de bytes. Uma medida em série dava meshopt 2,5 vezes mais rápido, e
   era artefato do agendamento por quadro do worker de Draco.
 - **ETC1S qlevel 200.** É o joelho da curva de PSNR. UASTC custa de 2,8 a 4 vezes
@@ -106,6 +106,8 @@ que custou trabalho.
   cliente que ainda segura o `tileset.json` anterior.
 - **O `sharp` antes do `ktx`.** O KTX-Software não lê WebP. Sem esse passo os 7
   modelos do DJI Terra saem 42% maiores, com a textura intacta e o Draco desfeito.
+- **O `upAxis` da origem, propagado até o conversor.** Ver a primeira armadilha
+  abaixo: apagar a declaração sem rotacionar a geometria deita o modelo.
 - **A ordem textura, depois geometria.** Mexer na textura decodifica o documento e
   desfaz o Draco. Inverter entrega arquivo sem compressão de geometria, e o
   sintoma é `extensionsUsed` vazio, nunca um erro.
@@ -128,6 +130,33 @@ que custou trabalho.
 
 ## Armadilhas conhecidas
 
+- **`asset.gltfUpAxis: "Z"` NÃO se apaga sem rotacionar a geometria.** O DJI
+  Terra declara Z-up, e o conteúdo dele está mesmo em Z-up. O campo não existe no
+  esquema de 1.1, e a conversão o remove. Removido sozinho, ele faz o Cesium ler
+  o conteúdo como Y-up: **o modelo aparece de pé**. Aconteceu com o Silo Oreste
+  Ceretta em 2026-08-22. Quem viu foi o chefe, na tela, depois de eu ter escrito
+  na documentação que a remoção era segura. O `criarConversor` recebe `upAxis` e
+  rotaciona (x fica, y recebe z, z recebe -y). O teste
+  `conteudo Z-up e rotacionado` reprova a volta.
+- **O ponto de navegação NÃO se preenche a mão.** O tileset do DJI Terra não
+  publica `properties` nem `boundingVolume.region`, só `box`. Até 2026-08-22 o
+  importador só lia as duas primeiras formas. Ele avisava "preencha a mão", e o
+  operador chutava: o Silo Oreste Ceretta entrou **3.657 m ao sul** do lugar
+  dele. Hoje o `envelopeGeodesico` mede a árvore inteira. Para modelo já
+  importado, `node scripts/remedir.js` refaz a medida sem reconverter.
+- **O box de um tile é LOCAL ao `transform` acumulado, nunca ECEF.** Ler o box
+  direto põe o modelo perto de (0, 0), no golfo da Guiné. O `transform` mora no
+  root do tileset EXTERNO, e não na raiz. Quem para na raiz não vê nenhum. O
+  teste `envelopeGeodesico resolve o transform do tileset externo` reprova a
+  volta, e a assertiva que pega é a latitude longe do equador.
+- **Modelo que flutua é falta de terreno no cliente, e não defeito do modelo.**
+  Um Cesium que não carrega o terreno cai EM SILÊNCIO para o
+  `EllipsoidTerrainProvider`. O chão vira liso na altura 0, e todo modelo passa a
+  flutuar a própria altura elipsoidal. O catálogo guarda essa altura medida em
+  `ground_height` e publica `height_offset` 0. Para a máquina sem terreno,
+  `node scripts/catalogo.js --js --sem-terreno` gera o config com
+  `heightOffset = -ground_height`. NUNCA gere o config de produção com essa
+  opção, e nunca ajuste a altura no olho.
 - **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
   o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
   No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e
@@ -138,7 +167,7 @@ que custou trabalho.
   `Data/d000/tileset.json` aponta `Data/d000/Data/c00.glb`. Resolver contra a
   raiz dá chave inexistente, e a conferência acusa falso.
 - **`asset.version: "0.0"`** aparece em 7 modelos do acervo (saída do DJI Terra).
-  É inválido pelo esquema; a conversão normaliza.
+  É inválido pelo esquema, e a conversão normaliza.
 - **O glTF-Transform sobrescreve `asset.generator` na LEITURA.** Ler a
   proveniência pelo `Document` devolve "glTF-Transform v4.4.2" para todo modelo.
   O `leGerador` de `b3dm.js` lê do JSON cru, que é onde o valor sobrevive.

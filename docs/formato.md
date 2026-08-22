@@ -259,9 +259,13 @@ Total: 96,8 GiB passam a cerca de 104 GiB, mais 8%.
   sem propriedade útil nos do DJI Terra. O equivalente em 1.1 seria
   `EXT_structural_metadata`, que ninguém consome hoje. A importação **conta** os
   tiles cuja batch table tinha conteúdo e avisa, em vez de jogar fora calado.
-- **`asset.gltfUpAxis`.** Nunca existiu no esquema de 1.1, e o glTF já é Y-up por
-  definição. Confira o valor na origem antes de converter: se o modelo aparecer
-  deitado ou girado depois, a causa é essa declaração.
+- **`asset.gltfUpAxis`.** Nunca existiu no esquema de 1.1. **Mas apagá-lo sem
+  mais nada deita o modelo**, e essa frase já esteve errada aqui: o conteúdo glTF
+  do DJI Terra está mesmo em Z-up, e sem a declaração o Cesium o lê como Y-up.
+  A conversão lê o campo na origem e **rotaciona a geometria** (x fica, y recebe
+  z, z recebe menos y), o que deixa o arquivo conforme 1.1 sem depender de o
+  Cesium continuar tolerando um campo fora do esquema. O Silo Oreste Ceretta saiu
+  de pé antes desse conserto.
 - **Até 3 pixels de borda da textura.** O ETC1S trabalha em blocos de 4x4, e a
   conversão corta para o múltiplo de 4 abaixo. A borda cortada é a que a UV do
   tile já não usa.

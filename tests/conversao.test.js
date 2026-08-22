@@ -6,7 +6,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { abrirTile, tipoDeTile, leGerador } from '../scripts/lib/b3dm.js';
-import { reescreveTileset, pontoDeNavegacao, ESCALA_GE } from '../scripts/lib/tileset.js';
+import {
+  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE,
+} from '../scripts/lib/tileset.js';
 
 /** Monta um glb minimo valido (so o chunk JSON). */
 function glbFalso(json = { asset: { version: '2.0' } }) {
@@ -187,4 +189,109 @@ test('o fator do DJI Terra e 16, e so ele tem fator', () => {
   assert.equal(ESCALA_GE['DJI Terra'], 16);
   assert.equal(ESCALA_GE['Agisoft Metashape'], undefined,
     'o Metashape escala o geometricError certo e nao pode ser tocado');
+});
+
+/* ===================================================================== */
+/* envelopeGeodesico                                                     */
+/* ===================================================================== */
+
+/**
+ * Matriz ENU->ECEF de um ponto, no formato column-major do 3D Tiles.
+ * E o `transform` que Metashape e DJI Terra gravam no root do tileset externo.
+ */
+function enuParaEcef(lonGrau, latGrau, altura) {
+  const lon = (lonGrau * Math.PI) / 180;
+  const lat = (latGrau * Math.PI) / 180;
+  const a = 6378137.0;
+  const e2 = (1 / 298.257223563) * (2 - 1 / 298.257223563);
+  const n = a / Math.sqrt(1 - e2 * Math.sin(lat) ** 2);
+  const x = (n + altura) * Math.cos(lat) * Math.cos(lon);
+  const y = (n + altura) * Math.cos(lat) * Math.sin(lon);
+  const z = (n * (1 - e2) + altura) * Math.sin(lat);
+  const sl = Math.sin(lon); const cl = Math.cos(lon);
+  const sf = Math.sin(lat); const cf = Math.cos(lat);
+  return [
+    -sl, cl, 0, 0,
+    -sf * cl, -sf * sl, cf, 0,
+    cf * cl, cf * sl, sf, 0,
+    x, y, z, 1,
+  ];
+}
+
+const ALVO = { lon: -53.374417, lat: -29.626104, altura: 62.3 };
+
+test('envelopeGeodesico resolve o transform do tileset externo', () => {
+  // Raiz sem transform, apontando um tileset externo que carrega o ENU->ECEF.
+  // E a forma exata do acervo: o box do tile de conteudo e LOCAL.
+  const docs = new Map([
+    ['tileset.json', {
+      asset: { version: '1.1' },
+      root: {
+        geometricError: 100,
+        boundingVolume: { box: [0, 0, 0, 500, 0, 0, 0, 500, 0, 0, 0, 100] },
+        content: { uri: 'Data/d0/tileset.json' },
+      },
+    }],
+    ['Data/d0/tileset.json', {
+      asset: { version: '1.1' },
+      root: {
+        transform: enuParaEcef(ALVO.lon, ALVO.lat, ALVO.altura),
+        geometricError: 10,
+        boundingVolume: { box: [0, 0, 0, 50, 0, 0, 0, 50, 0, 0, 0, 5] },
+        content: { uri: 'c0.glb' },
+      },
+    }],
+  ]);
+
+  const e = envelopeGeodesico(docs);
+  assert.ok(e, 'o envelope tem de fechar');
+  assert.ok(Math.abs(e.lon - ALVO.lon) < 1e-4, `lon ${e.lon}`);
+  assert.ok(Math.abs(e.lat - ALVO.lat) < 1e-4, `lat ${e.lat}`);
+  assert.ok(Math.abs(e.hChao - ALVO.altura) < 6, `chao ${e.hChao}`);
+  assert.equal(e.amostras, 8, 'um tile de conteudo rende os 8 cantos do box');
+
+  // O DEFEITO QUE ESTE TESTE TRAVA: ler o box sem aplicar o transform poe o
+  // modelo perto de (0, 0), no golfo da Guine. Aqui a latitude tem de ser a de
+  // Dona Francisca, e nao um numero perto de zero.
+  assert.ok(Math.abs(e.lat) > 20, 'o transform foi ignorado: latitude perto do equador');
+});
+
+test('envelopeGeodesico ignora o tile que nao tem geometria', () => {
+  // So o root, que aponta um externo INEXISTENTE: nao ha conteudo para medir.
+  const docs = new Map([
+    ['tileset.json', {
+      asset: { version: '1.1' },
+      root: {
+        geometricError: 100,
+        boundingVolume: { box: [0, 0, 0, 500, 0, 0, 0, 500, 0, 0, 0, 100] },
+        content: { uri: 'Data/sumiu/tileset.json' },
+      },
+    }],
+  ]);
+  assert.equal(envelopeGeodesico(docs), null);
+});
+
+test('envelopeGeodesico nao entra duas vezes no mesmo tileset externo', () => {
+  // Dois tiles apontando o MESMO externo. Sem a guarda de visitados uma arvore
+  // com referencia circular travaria o importador.
+  const t = enuParaEcef(ALVO.lon, ALVO.lat, ALVO.altura);
+  const docs = new Map([
+    ['tileset.json', {
+      root: {
+        boundingVolume: { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] },
+        children: [
+          { boundingVolume: { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] }, content: { uri: 'e.json' } },
+          { boundingVolume: { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] }, content: { uri: 'e.json' } },
+        ],
+      },
+    }],
+    ['e.json', {
+      root: {
+        transform: t,
+        boundingVolume: { box: [0, 0, 0, 5, 0, 0, 0, 5, 0, 0, 0, 5] },
+        content: { uri: 'c.glb' },
+      },
+    }],
+  ]);
+  assert.equal(envelopeGeodesico(docs).amostras, 8);
 });

@@ -46,8 +46,28 @@ export function getIndexDb() {
 
   const schema = readFileSync(resolve(__dirname, 'schema.sql'), 'utf-8');
   indexDb.exec(schema);
+  migraIndex(indexDb);
 
   return indexDb;
+}
+
+/**
+ * Colunas que entraram em `models` depois do primeiro index.db.
+ *
+ * `CREATE TABLE IF NOT EXISTS` NAO adiciona coluna a uma tabela que ja existe:
+ * ele simplesmente nao faz nada. Sem isto, um catalogo antigo continuaria de pe
+ * e todo INSERT novo falharia com "no column named ...".
+ */
+const COLUNAS_NOVAS = [
+  ['ground_height', 'REAL'],
+];
+
+/** Adiciona as colunas que faltam ao catalogo, sem tocar nos dados. */
+function migraIndex(db) {
+  const tem = new Set(db.prepare('PRAGMA table_info(models)').all().map((c) => c.name));
+  for (const [nome, tipo] of COLUNAS_NOVAS) {
+    if (!tem.has(nome)) db.exec(`ALTER TABLE models ADD COLUMN ${nome} ${tipo}`);
+  }
 }
 
 /**

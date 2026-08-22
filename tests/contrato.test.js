@@ -257,3 +257,98 @@ function glbComMalha() {
   const cb = Buffer.alloc(8); cb.writeUInt32LE(bin.length, 0); cb.write('BIN ', 4, 'ascii');
   return Buffer.concat([cab, cj, corpo, cb, bin]);
 }
+
+test('conteudo Z-up e rotacionado, e nao apenas desdeclarado', async () => {
+  // O DJI Terra grava `asset.gltfUpAxis: "Z"` no tileset.json, e o conteudo glTF
+  // dele esta MESMO em Z-up. Aquele campo nao existe no esquema de 3D Tiles 1.1,
+  // entao a conversao o remove. Removido SEM rotacionar a geometria, o Cesium
+  // passa a ler o conteudo como Y-up e o modelo aparece DE PE.
+  //
+  // ACONTECEU EM PRODUCAO: o Silo Oreste Ceretta saiu deitado, e quem viu foi o
+  // chefe, na tela. Este teste existe para isso nao voltar em silencio.
+  const { criarConversor } = await import('../scripts/lib/conversor.js');
+
+  const posY = await pontoDepoisDaConversao('Y');
+  const posZ = await pontoDepoisDaConversao('Z');
+
+  // Sem rotacao o vertice fica onde estava; com rotacao, y recebe z e z recebe -y.
+  assert.deepEqual(arredonda(posY), [1, 2, 3], 'sem upAxis Z nada pode se mover');
+  assert.deepEqual(arredonda(posZ), [1, 3, -2],
+    'Z-up tem de virar Y-up na geometria: x fica, y recebe z, z recebe -y');
+
+  async function pontoDepoisDaConversao(upAxis) {
+    const c = await criarConversor({ geometria: 'quantize', upAxis });
+    const r = await c.converte(glbUmVertice());
+    c.fecha();
+    return leUnicaPosicao(r.glb);
+  }
+  function arredonda(v) { return v.map((x) => Math.round(x * 1000) / 1000); }
+});
+
+/** glb com um triangulo cujo primeiro vertice e (1,2,3), sem indices nem textura. */
+function glbUmVertice() {
+  const pos = new Float32Array([1, 2, 3, 0, 0, 0, 0, 0, 1]);
+  const bin = Buffer.from(pos.buffer);
+  const json = {
+    asset: { version: '2.0', generator: 'teste' },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 2, 3] }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: bin.length }],
+    buffers: [{ byteLength: bin.length }],
+  };
+  let corpo = Buffer.from(JSON.stringify(json), 'utf-8');
+  const r1 = corpo.length % 4;
+  if (r1) corpo = Buffer.concat([corpo, Buffer.alloc(4 - r1, 0x20)]);
+  const cab = Buffer.alloc(12);
+  cab.write('glTF', 0, 'ascii'); cab.writeUInt32LE(2, 4);
+  cab.writeUInt32LE(12 + 8 + corpo.length + 8 + bin.length, 8);
+  const cj = Buffer.alloc(8); cj.writeUInt32LE(corpo.length, 0); cj.write('JSON', 4, 'ascii');
+  const cb = Buffer.alloc(8); cb.writeUInt32LE(bin.length, 0); cb.write('BIN ', 4, 'ascii');
+  return Buffer.concat([cab, cj, corpo, cb, bin]);
+}
+
+/**
+ * Le o primeiro POSITION do glb, ja com a transformacao do no aplicada.
+ *
+ * A rotacao pode sair de TRES formas, e as tres sao corretas: na `matrix` do no,
+ * decomposta em `rotation` (que e o que o glTF-Transform faz, num quaternion),
+ * ou assada nos bytes do vertice. O teste julga o PONTO NO ESPACO, e nao onde a
+ * conta ficou guardada: prender a forma seria reprovar uma conversao correta so
+ * porque a biblioteca mudou de representacao.
+ */
+function leUnicaPosicao(glb) {
+  const tamJson = glb.readUInt32LE(12);
+  const j = JSON.parse(glb.subarray(20, 20 + tamJson).toString('utf-8'));
+  const inicioBin = 20 + tamJson + 8;
+  const bv = j.bufferViews[j.accessors[0].bufferView];
+  const off = inicioBin + (bv.byteOffset || 0);
+  let v = [glb.readFloatLE(off), glb.readFloatLE(off + 4), glb.readFloatLE(off + 8)];
+
+  const no = j.nodes[0] || {};
+  if (no.matrix) {
+    const m = no.matrix;
+    v = [
+      m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12],
+      m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13],
+      m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14],
+    ];
+  } else if (no.rotation) {
+    const [x, y, z, w] = no.rotation;
+    // v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + w * v)
+    const cx = y * v[2] - z * v[1];
+    const cy = z * v[0] - x * v[2];
+    const cz = x * v[1] - y * v[0];
+    const tx = cx + w * v[0];
+    const ty = cy + w * v[1];
+    const tz = cz + w * v[2];
+    v = [
+      v[0] + 2 * (y * tz - z * ty),
+      v[1] + 2 * (z * tx - x * tz),
+      v[2] + 2 * (x * ty - y * tx),
+    ];
+  }
+  return v;
+}

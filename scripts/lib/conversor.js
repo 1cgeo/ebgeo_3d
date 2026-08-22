@@ -42,7 +42,7 @@ import { paraKTX2, abrirTemporario, fecharTemporario, QLEVEL_PADRAO } from './kt
  * Monta um conversor. Caro: chame uma vez por worker.
  * @returns {Promise<Conversor>}
  */
-export async function criarConversor({ geometria = 'draco' } = {}) {
+export async function criarConversor({ geometria = 'draco', upAxis = 'Y' } = {}) {
   const io = new NodeIO()
     .registerExtensions(ALL_EXTENSIONS)
     .registerDependencies({
@@ -63,6 +63,27 @@ export async function criarConversor({ geometria = 'draco' } = {}) {
       // Antes do readBinary, que sobrescreve o campo. Ver leGerador em b3dm.js.
       if (gerador === undefined) gerador = leGerador(envelope.glb);
       const doc = await io.readBinary(new Uint8Array(envelope.glb));
+
+      // Z-UP VIRA Y-UP AQUI, na geometria, e nao numa declaracao no tileset.
+      //
+      // O DJI Terra grava `asset.gltfUpAxis: "Z"` no tileset.json, e o conteudo
+      // glTF dele esta MESMO em Z-up. Aquele campo nunca existiu no esquema de
+      // 3D Tiles 1.1, entao a conversao o remove; removido sem mais nada, o
+      // Cesium passa a ler o conteudo como Y-up e o modelo aparece DE PE.
+      // Aconteceu com o Silo Oreste Ceretta, e o chefe viu na tela.
+      //
+      // Rotacionar a geometria e a saida certa: o arquivo fica conforme 1.1 e
+      // para de depender de o Cesium continuar tolerando um campo fora do
+      // esquema. A matriz e a Z_UP_TO_Y_UP do proprio Cesium: x fica, y recebe
+      // z, e z recebe -y.
+      if (upAxis === 'Z') {
+        const rot = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
+        for (const cena of doc.getRoot().listScenes()) {
+          for (const no of cena.listChildren()) {
+            no.setMatrix(multiplica(rot, no.getMatrix()));
+          }
+        }
+      }
 
       const basisu = doc.createExtension(KHRTextureBasisu).setRequired(true);
       let texturas = 0;
@@ -135,4 +156,24 @@ export async function criarConversor({ geometria = 'draco' } = {}) {
       fecharTemporario(tmp);
     },
   };
+}
+
+/**
+ * Multiplica duas matrizes 4x4 em ordem de coluna, que e a do glTF.
+ *
+ * Escrita a mao porque a alternativa seria puxar uma biblioteca de algebra
+ * inteira para uma unica multiplicacao por tile.
+ *
+ * @param {number[]} a @param {number[]} b @returns {number[]} a x b
+ */
+function multiplica(a, b) {
+  const r = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) {
+    for (let l = 0; l < 4; l++) {
+      let soma = 0;
+      for (let k = 0; k < 4; k++) soma += a[k * 4 + l] * b[c * 4 + k];
+      r[c * 4 + l] = soma;
+    }
+  }
+  return r;
 }

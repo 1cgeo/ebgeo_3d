@@ -28,6 +28,9 @@ function paraCatalogo(m, base) {
     local: m.local ?? undefined,
     data_captura: m.captured_at ?? undefined,
     heightOffset: m.height_offset ?? 0,
+    // Altura elipsoidal do chao, medida. O cliente sem terreno usa
+    // heightOffset = -groundHeight; ver docs/operacao.md.
+    groundHeight: m.ground_height ?? undefined,
     previewVideo: m.preview_video ?? undefined,
     previewThumbnail: m.preview_thumb ?? undefined,
   };

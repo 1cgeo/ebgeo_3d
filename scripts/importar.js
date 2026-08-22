@@ -43,7 +43,7 @@ import config from '../src/config.js';
 import { createModelDb, finalizarModelDb, getIndexDb, closeAll, closeModelDb } from '../src/db/connection.js';
 import { upsertModel, openImport, closeImport, getModelAny } from '../src/db/queries.js';
 import { versaoKtx, QLEVEL_PADRAO } from './lib/ktx2.js';
-import { reescreveTileset, pontoDeNavegacao, ESCALA_GE } from './lib/tileset.js';
+import { reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE } from './lib/tileset.js';
 import { tipoDeTile } from './lib/b3dm.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -129,7 +129,7 @@ function inventaria(raiz) {
  * @returns {Promise<object>} totais da conversao
  */
 function converteTiles(ctx) {
-  const { raiz, tiles, db, workers, qlevel, geometria, log } = ctx;
+  const { raiz, tiles, db, workers, qlevel, geometria, upAxis, log } = ctx;
   return new Promise((resolve, reject) => {
     const inserir = db.prepare('INSERT OR REPLACE INTO media (key, content) VALUES (?, ?)');
     const gravarLote = db.transaction((linhas) => {
@@ -166,7 +166,7 @@ function converteTiles(ctx) {
     };
 
     for (let i = 0; i < workers; i++) {
-      const w = new Worker(join(__dirname, 'converter-worker.js'), { workerData: { qlevel, geometria } });
+      const w = new Worker(join(__dirname, 'converter-worker.js'), { workerData: { qlevel, geometria, upAxis } });
       vivos.add(w);
 
       w.on('message', (m) => {
@@ -305,6 +305,18 @@ async function main() {
     process.exit(4);
   }
 
+  // O EIXO PARA CIMA DO CONTEUDO SAI DO tileset.json DA ORIGEM, e tem de ser
+  // lido AQUI: a conversao remove `asset.gltfUpAxis` (ele nunca existiu no
+  // esquema de 1.1), e sem passar a informacao adiante o conteudo Z-up do DJI
+  // Terra passa a ser lido como Y-up e o modelo aparece de pe.
+  const upAxis = (() => {
+    try {
+      const j = JSON.parse(readFileSync(join(o.origem, 'tileset.json'), 'utf-8'));
+      return ((j.asset && j.asset.gltfUpAxis) || 'Y').toUpperCase();
+    } catch { return 'Y'; }
+  })();
+  log(`  eixo para cima do conteudo: ${upAxis}${upAxis === 'Z' ? ' (a conversao rotaciona a geometria)' : ''}`);
+
   // Container de cada tile, por amostragem: um .pnts ou .cmpt no meio nao passa
   // por este conversor e precisa ser tratado antes, nao descoberto no fim.
   const amostraContainers = new Set();
@@ -351,8 +363,8 @@ async function main() {
   const token = `${Date.now().toString(36)}`;
   const importId = openImport(o.id, o.origem);
 
-  passo(`3. conversao (${o.workers} workers, geometria=${o.geometria}, qlevel=${o.qlevel}, ${ktxVersao})`);
-  const conv = await converteTiles({ raiz: o.origem, tiles, db, workers: o.workers, qlevel: o.qlevel, geometria: o.geometria, log });
+  passo(`3. conversao (${o.workers} workers, geometria=${o.geometria}, qlevel=${o.qlevel}, upAxis=${upAxis}, ${ktxVersao})`);
+  const conv = await converteTiles({ raiz: o.origem, tiles, db, workers: o.workers, qlevel: o.qlevel, geometria: o.geometria, upAxis, log });
   const taxa = conv.convertidos / conv.segundos;
   log(`  ${conv.convertidos.toLocaleString('pt-BR')} tiles em ${conv.segundos.toFixed(1)} s (${taxa.toFixed(1)} tiles/s)`);
   log(`  texturas ${conv.texturas.toLocaleString('pt-BR')}   triangulos ${conv.triangulos.toLocaleString('pt-BR')}`);
@@ -383,6 +395,10 @@ async function main() {
   let urisTrocadas = 0;
   let geEscalados = 0;
   let raizJson = null;
+  // A ARVORE INTEIRA, e nao so a raiz: o envelope geodesico so fecha com os
+  // tilesets externos, porque o `transform` que poe o box no lugar certo mora
+  // neles. Ver `envelopeGeodesico` em lib/tileset.js.
+  const arvore = new Map();
 
   for (const rel of inv.copias) {
     const bruto = readFileSync(join(o.origem, rel));
@@ -406,6 +422,7 @@ async function main() {
     const base = dirname(rel) === '.' ? '' : `${dirname(rel)}/`;
     for (const u of r.uris) referenciadas.add(normaliza(base + u));
     linhasJson.push([rel, Buffer.from(JSON.stringify(r.json), 'utf-8')]);
+    arvore.set(normaliza(rel), r.json);
     if (rel === 'tileset.json') raizJson = r.json;
   }
   gravarJson(linhasJson);
@@ -437,7 +454,15 @@ async function main() {
   }
 
   passo('6. fecho do banco');
-  const ponto = raizJson ? pontoDeNavegacao(raizJson) : null;
+  // DUAS FONTES PARA O PONTO, e a segunda nao e luxo. O `pontoDeNavegacao` le
+  // `properties` ou `boundingVolume.region`, e o DJI Terra nao publica nenhum
+  // dos dois: ali ele devolve null e o ponto ia a mao no catalogo. Foi assim que
+  // o Silo entrou 3,6 km ao sul do lugar dele. O envelope mede.
+  const envelope = envelopeGeodesico(arvore);
+  const declarado = raizJson ? pontoDeNavegacao(raizJson) : null;
+  const ponto = declarado || (envelope
+    ? { lon: envelope.lon, lat: envelope.lat, height: envelope.hChao }
+    : null);
   // O CABECALHO GUARDA TUDO QUE O PASSO 7 PRECISA. Nao e redundancia com o
   // index.db: e o que permite ao `--promover` terminar a importacao depois, sem
   // repetir a conversao, quando a troca do arquivo falha (ver abaixo).
@@ -448,6 +473,7 @@ async function main() {
     meta.run('tilesVersion', '1.1');
     meta.run('geometry', o.geometria);
     meta.run('escalaGe', String(escalaGe));
+    meta.run('upAxisOrigem', upAxis);
     meta.run('texture', 'ktx2-etc1s');
     meta.run('textureQuality', String(o.qlevel));
     meta.run('buildToken', token);
@@ -463,6 +489,7 @@ async function main() {
       meta.run('lat', String(ponto.lat));
       meta.run('height', String(ponto.height));
     }
+    if (envelope) meta.run('groundHeight', String(envelope.hChao));
   })();
   finalizarModelDb(db);
 
@@ -491,6 +518,7 @@ async function main() {
     lon: ponto ? ponto.lon : null,
     lat: ponto ? ponto.lat : null,
     height: ponto ? ponto.height + 500 : null,
+    ground_height: envelope ? envelope.hChao : null,
     height_offset: null,
     // Com o geometricError ja escalado no dado, o modelo NAO precisa mais de
     // maximumScreenSpaceError proprio: ele passa a se comportar bem no 16 que
@@ -515,8 +543,18 @@ async function main() {
     ratio: bytesFinal / inv.bytes,
     notes: null,
   });
-  if (ponto) log(`  navegacao lon=${ponto.lon.toFixed(6)} lat=${ponto.lat.toFixed(6)} h=${ponto.height.toFixed(1)} m`);
-  else log('  ATENCAO: o tileset nao publica lon/lat; preencha o ponto de navegacao a mao no catalogo');
+  if (ponto) {
+    log(`  navegacao lon=${ponto.lon.toFixed(6)} lat=${ponto.lat.toFixed(6)} h=${ponto.height.toFixed(1)} m`
+      + `  (${declarado ? 'declarado no tileset' : 'medido pelo envelope'})`);
+  } else {
+    log('  ATENCAO: o tileset nao publica lon/lat e o envelope nao fechou; preencha a mao no catalogo');
+  }
+  if (envelope) {
+    log(`  envelope: chao ${envelope.hChao.toFixed(1)} m elipsoidal`
+      + ` (${envelope.hMin.toFixed(1)} a ${envelope.hMax.toFixed(1)}),`
+      + ` raio ${Math.round(envelope.raio)} m, ${envelope.amostras.toLocaleString('pt-BR')} cantos`);
+    log('  SEM TERRENO no cliente o modelo flutua essa altura: use heightOffset = -chao');
+  }
   if (o.limite) log('  publicado=0 porque a importacao foi parcial (--limite)');
 
   log(`\n=== IMPORTADO: ${o.id} em ${(conv.segundos / 60).toFixed(1)} min ===`);
@@ -647,6 +685,7 @@ function promover(id) {
     lon: m.lon != null ? Number(m.lon) : null,
     lat: m.lat != null ? Number(m.lat) : null,
     height: m.height != null ? Number(m.height) + 500 : null,
+    ground_height: m.groundHeight != null ? Number(m.groundHeight) : null,
     height_offset: null,
     max_sse: null,
     description: null,

@@ -17,8 +17,8 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { readFile } from 'node:fs/promises';
 import { criarConversor } from './lib/conversor.js';
 
-const { qlevel, geometria } = workerData;
-const conversor = await criarConversor({ geometria });
+const { qlevel, geometria, upAxis } = workerData;
+const conversor = await criarConversor({ geometria, upAxis });
 
 parentPort.on('message', async (msg) => {
   if (msg.fim) {

@@ -51,7 +51,8 @@ aqui sem ele daria um caminho que responde 404 do lado de fora.
       "type": "3dtiles",
       "url": "/ebgeo_3d/api/v1/models/ponte-quatis/tileset.json",
       "heightOffset": 0,
-      "locate": { "lon": -44.289521, "lat": -22.402243, "height": 840 },
+      "groundHeight": 343.2,
+      "locate": { "lon": -44.286984, "lat": -22.400374, "height": 843.2 },
       "formato": {
         "tilesVersion": "1.1",
         "geometry": "draco",
@@ -71,6 +72,11 @@ aqui sem ele daria um caminho que responde 404 do lado de fora.
 `Cache-Control: public, max-age=300`.
 
 Modelo com `published = 0` não aparece.
+
+`groundHeight` é a altura elipsoidal do chão, medida na importação. O cliente que
+não tem terreno vê o modelo flutuar exatamente essa altura, e o contorno é
+publicar `heightOffset = -groundHeight`. Ver `docs/operacao.md`, "Modelo que
+flutua".
 
 ---
 

@@ -201,3 +201,172 @@ export function pontoDeNavegacao(json) {
 
   return null;
 }
+
+/* ===================================================================== */
+
+const RAIO_EQ = 6378137.0;
+const ACHATAMENTO = 1 / 298.257223563;
+const E2 = ACHATAMENTO * (2 - ACHATAMENTO);
+
+/** Converte ECEF para (lon, lat, altura elipsoidal). Bowring iterado. */
+function paraGeodesico(x, y, z) {
+  const lon = Math.atan2(y, x);
+  const p = Math.hypot(x, y);
+  let lat = Math.atan2(z, p * (1 - E2));
+  let h = 0;
+  for (let i = 0; i < 12; i++) {
+    const n = RAIO_EQ / Math.sqrt(1 - E2 * Math.sin(lat) ** 2);
+    h = p / Math.cos(lat) - n;
+    lat = Math.atan2(z, p * (1 - (E2 * n) / (n + h)));
+  }
+  const grau = 180 / Math.PI;
+  return { lon: lon * grau, lat: lat * grau, h };
+}
+
+/** Produto de duas matrizes 4x4 column-major, a forma que o 3D Tiles grava. */
+function multiplica4(a, b) {
+  const r = new Array(16).fill(0);
+  for (let c = 0; c < 4; c++) {
+    for (let l = 0; l < 4; l++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k * 4 + l] * b[c * 4 + k];
+      r[c * 4 + l] = s;
+    }
+  }
+  return r;
+}
+
+/** Aplica a matriz a um ponto. */
+function transforma(m, x, y, z) {
+  return [
+    m[0] * x + m[4] * y + m[8] * z + m[12],
+    m[1] * x + m[5] * y + m[9] * z + m[13],
+    m[2] * x + m[6] * y + m[10] * z + m[14],
+  ];
+}
+
+/** Resolve uma uri relativa contra o diretorio do tileset que a cita. */
+function resolveChave(base, uri) {
+  const partes = [];
+  for (const p of `${base ? `${base}/` : ''}${uri}`.split('/')) {
+    if (p === '' || p === '.') continue;
+    if (p === '..') { partes.pop(); continue; }
+    partes.push(p);
+  }
+  return partes.join('/');
+}
+
+/**
+ * @typedef {object} Envelope
+ * @property {number} lon        - centro, em graus
+ * @property {number} lat        - centro, em graus
+ * @property {number} hMin       - menor altura elipsoidal do conteudo
+ * @property {number} hChao      - mediana, que e a estimativa do chao
+ * @property {number} hMax
+ * @property {number} raio       - meia-diagonal horizontal, em metros
+ * @property {number} amostras   - quantos cantos de tile entraram na conta
+ */
+
+/**
+ * Mede o envelope geodesico de um modelo percorrendo TODA a arvore de tilesets.
+ *
+ * Existe porque `pontoDeNavegacao` devolve null quando o tileset traz
+ * `boundingVolume.box` puro, sem `properties` e sem `region`, que e o caso do
+ * DJI Terra. Ali o ponto entrava a mao no catalogo, e foi exatamente o que
+ * errou: o Silo entrou 3,6 km ao sul do lugar dele.
+ *
+ * O CUIDADO QUE FAZ A CONTA VALER: o box de um tile e local ao `transform`
+ * ACUMULADO da raiz ate ele, e nao ECEF. Ler o box direto poe o modelo no meio
+ * do Atlantico, com latitude perto de zero. Cada tileset externo reentra com o
+ * transform do tile que o referencia ja multiplicado.
+ *
+ * `hChao` e a MEDIANA das alturas dos cantos, e nao o minimo: o minimo e o canto
+ * de uma caixa folgada, e afunda o modelo. Medido no Silo, minimo 39,5 m contra
+ * mediana 62,3 m; na Ponte, 292,6 m contra 343,2 m.
+ *
+ * @param {Map<string,object>|object} docs - chave normalizada -> tileset ja parseado
+ * @param {string} [raiz] - chave do tileset de entrada
+ * @returns {Envelope|null}
+ */
+export function envelopeGeodesico(docs, raiz = 'tileset.json') {
+  const mapa = docs instanceof Map ? docs : new Map(Object.entries(docs));
+  const entrada = mapa.get(raiz);
+  if (!entrada || !entrada.root) return null;
+
+  const lons = [];
+  const lats = [];
+  const alturas = [];
+  const visitados = new Set([raiz]);
+
+  function anda(tile, matriz, base) {
+    if (!tile || typeof tile !== 'object') return;
+    const m = Array.isArray(tile.transform) && tile.transform.length === 16
+      ? multiplica4(matriz, tile.transform)
+      : matriz;
+
+    const conteudos = [];
+    if (tile.content) conteudos.push(tile.content);
+    if (Array.isArray(tile.contents)) conteudos.push(...tile.contents);
+
+    let temGeometria = false;
+    for (const c of conteudos) {
+      const uri = String(c && c.uri ? c.uri : '').split('?')[0];
+      if (!uri) continue;
+      if (uri.endsWith('.json')) {
+        const alvo = resolveChave(base, uri);
+        const externo = mapa.get(alvo);
+        if (externo && externo.root && !visitados.has(alvo)) {
+          visitados.add(alvo);
+          const corte = alvo.lastIndexOf('/');
+          anda(externo.root, m, corte < 0 ? '' : alvo.slice(0, corte));
+        }
+      } else if (!uri.endsWith('.subtree')) {
+        temGeometria = true;
+      }
+    }
+
+    const box = tile.boundingVolume && tile.boundingVolume.box;
+    if (temGeometria && Array.isArray(box) && box.length === 12) {
+      for (const sx of [-1, 1]) {
+        for (const sy of [-1, 1]) {
+          for (const sz of [-1, 1]) {
+            const v = transforma(m,
+              box[0] + sx * box[3] + sy * box[6] + sz * box[9],
+              box[1] + sx * box[4] + sy * box[7] + sz * box[10],
+              box[2] + sx * box[5] + sy * box[8] + sz * box[11]);
+            const g = paraGeodesico(v[0], v[1], v[2]);
+            lons.push(g.lon); lats.push(g.lat); alturas.push(g.h);
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(tile.children)) for (const f of tile.children) anda(f, m, base);
+  }
+
+  const corte = raiz.lastIndexOf('/');
+  anda(entrada.root, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    corte < 0 ? '' : raiz.slice(0, corte));
+
+  if (!alturas.length) return null;
+  alturas.sort((a, b) => a - b);
+  // REDUCE, E NAO `Math.min(...lons)`: a Ponte de Quatis rende 60.008 cantos, e
+  // o spread de um array desse tamanho estoura a pilha de argumentos.
+  const menor = (v) => v.reduce((a, b) => (b < a ? b : a), Infinity);
+  const maior = (v) => v.reduce((a, b) => (b > a ? b : a), -Infinity);
+  const lonMin = menor(lons); const lonMax = maior(lons);
+  const latMin = menor(lats); const latMax = maior(lats);
+  const lat = (latMin + latMax) / 2;
+  const metroPorGrau = 111320;
+  const largura = (lonMax - lonMin) * metroPorGrau * Math.cos((lat * Math.PI) / 180);
+  const altura = (latMax - latMin) * metroPorGrau;
+  return {
+    lon: (lonMin + lonMax) / 2,
+    lat,
+    hMin: alturas[0],
+    hChao: alturas[Math.floor(alturas.length / 2)],
+    hMax: alturas[alturas.length - 1],
+    raio: Math.hypot(largura, altura) / 2,
+    amostras: alturas.length,
+  };
+}
