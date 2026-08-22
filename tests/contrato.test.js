@@ -176,11 +176,29 @@ test('importar recusa id fora do padrao', async () => {
  * `--env-file-if-exists` NAO entra: o teste tem de rodar com o ambiente que ele
  * mesmo montou, e nao com o .env da maquina de quem roda.
  */
+/**
+ * Um `ktx` que so precisa RESPONDER, e por isso e o proprio `node`.
+ *
+ * O roteiro confere o binario antes de converter, e o `npm test` NAO carrega o
+ * `.env` (onde mora `KTX_BIN`). Sem isto o teste falharia por ferramenta
+ * ausente, acusando o roteiro por uma instalacao.
+ *
+ * `node --version` responde em qualquer plataforma, e e o que o `versaoKtx`
+ * precisa. Um script `.cmd` nao serve: o `execFile` do Node recusa arquivo de
+ * lote no Windows com EINVAL, e foi o que a versao anterior deste helper deu.
+ *
+ * O tile destes testes NAO TEM TEXTURA, entao o `ktx create` nunca e chamado.
+ * Se algum dia tiver, este atalho para de valer e o teste vai dizer.
+ */
+function ktxQueResponde() {
+  return process.execPath;
+}
+
 async function rodaRoteiro(argv) {
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, argv, {
       cwd: repo,
-      env: { ...process.env, EBGEO3D_DATA_DIR: raiz },
+      env: { ...process.env, EBGEO3D_DATA_DIR: raiz, KTX_BIN: ktxQueResponde() },
     });
     return { code: 0, saida: stdout + stderr };
   } catch (err) {
@@ -370,3 +388,53 @@ test('o offset sem terreno usa a BASE, e nao a mediana do chao', () => {
   assert.equal(+(envelope.hMin + offsetErrado).toFixed(1), -22.8);
 });
 
+
+test('o roteiro de arvore chega ao CATALOGO, e nao so ao arquivo', async () => {
+  // O DEFEITO QUE ESTE TESTE TRAVA, e ele custou quatro importacoes.
+  //
+  // Ao acrescentar as colunas do modelo GLB (`model_type` e a posicao), eu
+  // atualizei o `importar-glb.js` e os testes que chamam `upsertModel` DIRETO,
+  // e esqueci o `importar.js`. O better-sqlite3 exige todo parametro nomeado,
+  // entao ele lancava `Missing named parameter "model_type"` no passo 7.
+  //
+  // O SINTOMA ERA CRUEL: os passos 1 a 6 passavam, o `.3dtiles` ficava no disco
+  // com o tamanho certo, a saida imprimia "publicado", e o modelo nao existia
+  // para o servico. Quatro modelos ficaram assim, com a importacao presa em
+  // "rodando".
+  //
+  // A LACUNA ERA DE NIVEL: os testes exercitavam `upsertModel`, e nao o
+  // ROTEIRO. Este aciona o roteiro de ponta a ponta e pergunta ao CATALOGO.
+  const origem = join(raiz, 'origem-catalogo');
+  mkdirSync(join(origem, 'Data'), { recursive: true });
+  writeFileSync(join(origem, 'tileset.json'), JSON.stringify({
+    asset: { version: '1.0' },
+    geometricError: 100,
+    root: {
+      geometricError: 10,
+      refine: 'REPLACE',
+      boundingVolume: { region: [-0.7754, -0.3910, -0.7753, -0.3909, 0, 10] },
+      content: { uri: 'Data/a.glb' },
+    },
+  }));
+  writeFileSync(join(origem, 'Data', 'a.glb'), glbComMalha());
+
+  const r = await rodaRoteiro([
+    join(repo, 'scripts', 'importar.js'),
+    '--origem', origem, '--id', 'ate-o-catalogo', '--nome', 'Ate o catalogo',
+  ]);
+  assert.equal(r.code, 0, `o roteiro falhou:\n${r.saida}`);
+
+  // A PERGUNTA E AO CATALOGO, e nao a saida do roteiro. O eco dele ja dizia
+  // "publicado" enquanto o catalogo estava vazio.
+  const { getIndexDb: abre } = await import('../src/db/connection.js');
+  const linha = abre().prepare('SELECT * FROM models WHERE id = ?').get('ate-o-catalogo');
+  assert.ok(linha, 'o modelo nao chegou ao catalogo');
+  assert.equal(linha.model_type, '3dtiles');
+  assert.equal(linha.tile_count, 1);
+
+  // E a importacao tem de FECHAR: presa em "rodando" e o rastro do defeito.
+  const imp = abre().prepare(
+    'SELECT status FROM imports WHERE model_id = ? ORDER BY id DESC LIMIT 1',
+  ).get('ate-o-catalogo');
+  assert.equal(imp?.status, 'ok', 'a importacao ficou sem fecho');
+});

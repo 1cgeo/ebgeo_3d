@@ -199,6 +199,20 @@ que custou trabalho.
 - **`Accept-Ranges` na rota de cenas não é detalhe.** O visualizador lê o
   `voxel.bin` em faixa, e sem isso baixaria o octree inteiro para ler o
   cabeçalho. Um `Range` tem de devolver 206, e há teste.
+- **Coluna nova no catálogo exige tocar TODOS os chamadores de `upsertModel`.**
+  O better-sqlite3 exige todo parâmetro nomeado. Ao acrescentar `model_type` eu
+  atualizei o `importar-glb.js` e os testes que chamam `upsertModel` direto, e
+  esqueci o `importar.js`: os passos 1 a 6 passavam, o `.3dtiles` ficava no
+  disco com o tamanho certo, a saída dizia "publicado", e o modelo não existia
+  para o serviço. Quatro modelos, 40 minutos de conversão. Hoje há teste que
+  aciona o ROTEIRO e pergunta ao CATÁLOGO, e não ao `upsertModel`.
+- **`node scripts/adotar.js` registra um `.3dtiles` que já está em disco**, lendo
+  o cabeçalho `meta`. Serve para o caso acima e para qualquer falha depois da
+  conversão. Ele recusa cabeçalho incompleto em vez de completar por adivinhação.
+- **Teste que aciona roteiro precisa de um `KTX_BIN` que responda.** O
+  `npm test` não carrega o `.env`. O `ktxQueResponde()` aponta o próprio `node`,
+  que responde `--version` em qualquer plataforma. Um `.cmd` NÃO serve: o
+  `execFile` recusa arquivo de lote no Windows com EINVAL.
 - **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
   o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
   No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e

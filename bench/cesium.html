@@ -73,13 +73,31 @@ const EBGEO = {
 };
 
 /** Os modelos publicados, com o ponto que o catalogo MEDE. */
-// lon, lat, chao e raio SAO MEDIDOS: saem do `envelopeGeodesico` da importacao,
-// e nao de estimativa. `node scripts/remedir.js --dry-run` os reimprime.
-const MODELOS = {
-  'silo-dona-francisca': { lon: -53.374417, lat: -29.626104, chao: 62.3, raio: 627 },
-  'silo-tex512': { lon: -53.374417, lat: -29.626104, chao: 62.3, raio: 627 },
-  'ponte-quatis': { lon: -44.286984, lat: -22.400374, chao: 343.2, raio: 655 },
-};
+// O CATALOGO DA BANCADA VEM DO SERVICO, e nao de uma lista aqui.
+//
+// Ele ja tinha ficado desatualizado uma vez: um modelo importado depois nao
+// entrava na lista fixa, e a bancada respondia "modelo desconhecido" para algo
+// que estava servido. lon, lat e chao sao MEDIDOS pelo envelope na importacao,
+// e o raio sai do proprio ponto de navegacao.
+const MODELOS = {};
+
+/** Le o catalogo do servico e preenche MODELOS. */
+async function carregaCatalogo() {
+  const r = await fetch(BASE);
+  const { tilesets } = await r.json();
+  for (const t of tilesets) {
+    if (!t.locate) continue;
+    MODELOS[t.id] = {
+      lon: t.locate.lon,
+      lat: t.locate.lat,
+      chao: t.groundHeight ?? 0,
+      // `locate.height` e o chao mais 500 m, a distancia de camera que enquadra
+      // o modelo. O raio sai dai, e nao de um numero digitado.
+      raio: Math.max(100, (t.locate.height ?? 1000) - (t.groundHeight ?? 0)),
+    };
+  }
+  return Object.keys(MODELOS);
+}
 
 let viewer;
 let sc;
@@ -377,7 +395,9 @@ window.compara = async function (casos, rodadas) {
   sc.skyAtmosphere.show = false;
   sc.light = new Cesium.DirectionalLight({ direction: new Cesium.Cartesian3(0.35, -0.5, -0.8) });
 
+  const ids = await carregaCatalogo();
   const cad = await cadenciaOciosa(200);
+  log('modelos servidos: ' + ids.length + '  (' + ids.join(', ') + ')');
   log('CesiumJS ' + Cesium.VERSION
     + '   visibilidade: ' + document.visibilityState
     + '   agendador: ' + cad.toFixed(3) + ' ms por tick');

@@ -567,6 +567,15 @@ async function main() {
     ground_height: envelope ? envelope.hChao : null,
     min_height: envelope ? envelope.hMin : null,
     height_offset: null,
+    // Este roteiro so importa ARVORE. O modelo GLB solto tem roteiro proprio,
+    // `importar-glb.js`, e e ele quem grava `glb` aqui.
+    model_type: '3dtiles',
+    position_lon: null,
+    position_lat: null,
+    rot_heading: null,
+    rot_pitch: null,
+    rot_roll: null,
+    scale: null,
     // Com o geometricError ja escalado no dado, o modelo NAO precisa mais de
     // maximumScreenSpaceError proprio: ele passa a se comportar bem no 16 que
     // o ebgeo_web usa por padrao.
@@ -688,6 +697,13 @@ function promover(id) {
     ground_height: m.groundHeight != null ? Number(m.groundHeight) : null,
     min_height: m.minHeight != null ? Number(m.minHeight) : null,
     height_offset: null,
+    model_type: m.modelType || '3dtiles',
+    position_lon: null,
+    position_lat: null,
+    rot_heading: null,
+    rot_pitch: null,
+    rot_roll: null,
+    scale: null,
     max_sse: null,
     description: null,
     local: null,

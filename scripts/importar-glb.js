@@ -224,6 +224,16 @@ async function main() {
     meta.run('builtAt', new Date().toISOString());
     meta.run('sourcePath', achado.arquivo);
     meta.run('ktx', ktxVersao);
+    // `tileCount` e `sourceBytes` sao o contrato do cabecalho, e o `adotar.js`
+    // os exige: sem eles um `.3dtiles` em disco nao volta ao catalogo sem
+    // reconverter. Aqui o modelo e UM objeto, e a contagem e 1.
+    meta.run('tileCount', '1');
+    meta.run('jsonCount', '0');
+    meta.run('sourceBytes', String(bytesEntrada));
+    meta.run('lon', String(o.lon));
+    meta.run('lat', String(o.lat));
+    meta.run('height', String(o.altura));
+    meta.run('published', '1');
     meta.run('positionLon', String(o.lon));
     meta.run('positionLat', String(o.lat));
   })();
