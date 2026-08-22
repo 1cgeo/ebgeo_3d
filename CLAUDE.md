@@ -38,6 +38,7 @@ npm run knip
 node scripts/importar.js --origem <dir> --id <slug> [--nome "..."] \
                          [--workers 12] [--qlevel 200] [--limite N] \
                          [--forcar] [--dry-run]
+node scripts/importar.js --promover --id <slug>   # termina uma importacao travada
 node scripts/verificar.js --id <slug> [--origem <dir>]
 node scripts/catalogo.js [--js --base /ebgeo_3d]
 node scripts/cleanup-wal.js [--dry-run]
@@ -121,9 +122,10 @@ que custou trabalho.
 
 ## Armadilhas conhecidas
 
-- **Windows segura o arquivo.** Um handle SQLite aberto impede substituir o
-  `.3dtiles` (`EPERM`). O `connection.js` expõe `closeModelDb` para isso, e o
-  roteiro de importação chama antes de mexer no arquivo.
+- **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
+  o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
+  No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e
+  manda usar `--promover` depois de parar o serviço.
 - **Tile vazio existe.** No Ponte_Quatis são 5 em 7.501: sem malha e sem imagem,
   já assim na origem. Nenhuma régua pode exigir Draco deles.
 - **A URI é relativa ao próprio `tileset.json`.** Um `Data/c00.glb` dentro de

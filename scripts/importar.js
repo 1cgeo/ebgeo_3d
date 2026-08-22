@@ -37,6 +37,7 @@ import { Worker } from 'node:worker_threads';
 import { readFileSync, statSync, existsSync, readdirSync, renameSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join, relative, dirname, extname, basename } from 'node:path';
 import { availableParallelism } from 'node:os';
+import Database from 'better-sqlite3';
 import { fileURLToPath } from 'node:url';
 import config from '../src/config.js';
 import { createModelDb, finalizarModelDb, getIndexDb, closeAll, closeModelDb } from '../src/db/connection.js';
@@ -71,6 +72,7 @@ function args() {
     qlevel: parseInt(v('--qlevel', String(QLEVEL_PADRAO)), 10),
     limite: v('--limite') ? parseInt(v('--limite'), 10) : null,
     forcar: a.includes('--forcar'),
+    promover: a.includes('--promover'),
     dryRun: a.includes('--dry-run'),
   };
 }
@@ -221,6 +223,11 @@ function converteTiles(ctx) {
 
 async function main() {
   const o = args();
+  if (o.promover) {
+    if (!o.id) { console.error('Uso: node scripts/importar.js --promover --id <slug>'); process.exit(2); }
+    promover(o.id);
+    return;
+  }
   if (!o.origem || !o.id) {
     console.error('Uso: node scripts/importar.js --origem <dir> --id <slug> [--nome "..."] [--workers N] [--qlevel 200] [--forcar]');
     process.exit(2);
@@ -385,9 +392,14 @@ async function main() {
   }
 
   passo('6. fecho do banco');
+  const ponto = raizJson ? pontoDeNavegacao(raizJson) : null;
+  // O CABECALHO GUARDA TUDO QUE O PASSO 7 PRECISA. Nao e redundancia com o
+  // index.db: e o que permite ao `--promover` terminar a importacao depois, sem
+  // repetir a conversao, quando a troca do arquivo falha (ver abaixo).
   const meta = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
   db.transaction(() => {
     meta.run('id', o.id);
+    meta.run('name', o.nome || o.id);
     meta.run('tilesVersion', '1.1');
     meta.run('geometry', 'draco');
     meta.run('texture', 'ktx2-etc1s');
@@ -396,19 +408,22 @@ async function main() {
     meta.run('builtAt', new Date().toISOString());
     meta.run('sourcePath', o.origem);
     meta.run('ktx', ktxVersao);
+    meta.run('tileCount', String(tiles.length));
+    meta.run('jsonCount', String(inv.copias.length));
+    meta.run('sourceBytes', String(inv.bytes));
+    meta.run('published', o.limite ? '0' : '1');
+    if (ponto) {
+      meta.run('lon', String(ponto.lon));
+      meta.run('lat', String(ponto.lat));
+      meta.run('height', String(ponto.height));
+    }
   })();
   finalizarModelDb(db);
 
-  closeModelDb(dbFilename);
-  for (const f of [destino, `${destino}-wal`, `${destino}-shm`]) {
-    if (existsSync(f)) unlinkSync(f);
-  }
-  renameSync(temporario, destino);
-  const bytesFinal = statSync(destino).size;
+  const bytesFinal = trocaArquivo({ temporario, destino, dbFilename, importId, conv, log });
   log(`  ${dbFilename}  ${(bytesFinal / 2 ** 20).toFixed(1)} MiB  (origem ${(inv.bytes / 2 ** 20).toFixed(1)} MiB, razao ${(bytesFinal / inv.bytes).toFixed(4)})`);
 
   passo('7. catalogo');
-  const ponto = raizJson ? pontoDeNavegacao(raizJson) : null;
   const gerador = conv.gerador || null;
   upsertModel({
     id: o.id,
@@ -457,6 +472,143 @@ async function main() {
 
   log(`\n=== IMPORTADO: ${o.id} em ${(conv.segundos / 60).toFixed(1)} min ===`);
   log(`URL para o ebgeo_web: /api/v1/models/${o.id}/tileset.json`);
+  closeAll();
+}
+
+/**
+ * Troca o arquivo publicado pelo recem-construido.
+ *
+ * AQUI MORA A UNICA DIFERENCA DE PLATAFORMA DESTE ROTEIRO. No Linux, que e onde
+ * o container roda, substituir um arquivo com handle aberto e permitido: o inode
+ * antigo sobrevive ate o ultimo leitor fechar, e o servico troca sozinho na
+ * proxima conferencia de mtime. No Windows o mesmo passo devolve EBUSY, porque
+ * um handle aberto SEGURA o arquivo, e o `closeModelDb` daqui so fecha a conexao
+ * DESTE processo: o servico e outro.
+ *
+ * Quando isso acontece, o trabalho NAO se perde. O `.parcial` esta pronto e
+ * conferido, e `--promover` termina a importacao a partir dele.
+ *
+ * @returns {number} bytes do arquivo publicado
+ */
+function trocaArquivo({ temporario, destino, dbFilename, importId, conv, log }) {
+  closeModelDb(dbFilename);
+  try {
+    for (const f of [destino, `${destino}-wal`, `${destino}-shm`]) {
+      if (existsSync(f)) unlinkSync(f);
+    }
+    renameSync(temporario, destino);
+  } catch (err) {
+    if (!['EBUSY', 'EPERM', 'EACCES'].includes(err.code)) throw err;
+    console.error(`\n=== PARADO no passo 6: o arquivo publicado esta em uso (${err.code}) ===`);
+    console.error('A conversao terminou e passou na conferencia. Nada se perdeu.');
+    console.error('No Windows o servico no ar segura o arquivo, e ele e outro processo.');
+    console.error('\nPare o servico e rode:');
+    console.error(`  node scripts/importar.js --promover --id ${dbFilename.replace(/\.3dtiles$/, '')}`);
+    closeImport({
+      id: importId,
+      finished_at: new Date().toISOString(),
+      status: 'falhou',
+      tiles_in: conv.tentados,
+      tiles_out: conv.convertidos,
+      textures: conv.texturas,
+      failures: conv.falhasTextura,
+      seconds: conv.segundos,
+      ratio: null,
+      notes: `troca do arquivo bloqueada (${err.code}); .parcial pronto para --promover`,
+    });
+    closeAll();
+    process.exit(6);
+  }
+  log(`  ${dbFilename} publicado`);
+  return statSync(destino).size;
+}
+
+/**
+ * Termina uma importacao a partir do `.parcial` que ficou pronto.
+ *
+ * Nao reconverte nada: le o cabecalho que o passo 6 gravou, troca o arquivo e
+ * escreve o catalogo. E o conserto do caso EBUSY acima.
+ */
+function promover(id) {
+  const dbFilename = `${id}.3dtiles`;
+  const destino = join(config.modelsDbDir, dbFilename);
+  const temporario = `${destino}.parcial`;
+  if (!existsSync(temporario)) {
+    console.error(`ERRO: nao ha ${dbFilename}.parcial para promover.`);
+    process.exit(2);
+  }
+
+  getIndexDb();
+  // Le o cabecalho do proprio arquivo: ele carrega tudo que o catalogo precisa.
+  const lido = new Database(temporario, { readonly: true });
+  const m = Object.fromEntries(lido.prepare('SELECT key, value FROM meta').all().map((r) => [r.key, r.value]));
+  const entradas = lido.prepare('SELECT COUNT(*) AS n FROM media').get().n;
+  const glbs = lido.prepare("SELECT COUNT(*) AS n FROM media WHERE key LIKE '%.glb'").get().n;
+  lido.close();
+
+  // O CABECALHO TEM DE ESTAR COMPLETO. Um `.parcial` gravado por uma versao
+  // anterior deste roteiro nao traz tileCount nem name, e sem esta guarda o
+  // catalogo receberia `tile_count = 0` num modelo com 7.501 tiles. Nao e
+  // hipotese: aconteceu, e quem pegou foi o `verificar.js`.
+  const faltando = ['id', 'buildToken', 'builtAt', 'tileCount'].filter((k) => m[k] == null);
+  if (faltando.length) {
+    console.error(`ERRO: o cabecalho do .parcial nao tem ${faltando.join(', ')}.`);
+    console.error('Ele foi gravado por uma versao anterior. Refaca a importacao inteira.');
+    closeAll();
+    process.exit(7);
+  }
+  if (Number(m.tileCount) !== glbs) {
+    console.error(`ERRO: o cabecalho diz ${m.tileCount} tiles e o arquivo tem ${glbs}.`);
+    closeAll();
+    process.exit(7);
+  }
+
+  console.log(`promovendo ${dbFilename}: token ${m.buildToken}, ${entradas.toLocaleString('pt-BR')} entradas`);
+
+  closeModelDb(dbFilename);
+  try {
+    for (const f of [destino, `${destino}-wal`, `${destino}-shm`]) {
+      if (existsSync(f)) unlinkSync(f);
+    }
+    renameSync(temporario, destino);
+  } catch (err) {
+    console.error(`ERRO: o arquivo publicado continua em uso (${err.code}). Pare o servico e tente de novo.`);
+    closeAll();
+    process.exit(6);
+  }
+
+  const bytesFinal = statSync(destino).size;
+  upsertModel({
+    id: m.id,
+    name: m.name || m.id,
+    db_filename: dbFilename,
+    source: null,
+    source_version: null,
+    captured_at: null,
+    tiles_version: m.tilesVersion || '1.1',
+    geometry_codec: m.geometry || 'draco',
+    texture_codec: m.texture || 'ktx2-etc1s',
+    texture_quality: Number(m.textureQuality || 200),
+    tile_count: Number(m.tileCount || 0),
+    json_count: Number(m.jsonCount || 0),
+    total_bytes: bytesFinal,
+    source_bytes: Number(m.sourceBytes || 0),
+    build_token: m.buildToken,
+    built_at: m.builtAt,
+    lon: m.lon != null ? Number(m.lon) : null,
+    lat: m.lat != null ? Number(m.lat) : null,
+    height: m.height != null ? Number(m.height) + 500 : null,
+    height_offset: null,
+    max_sse: null,
+    description: null,
+    local: null,
+    keywords: null,
+    preview_video: null,
+    preview_thumb: null,
+    published: Number(m.published ?? 1),
+  });
+  console.log(`  ${dbFilename}  ${(bytesFinal / 2 ** 20).toFixed(1)} MiB  publicado`);
+  console.log(`URL para o ebgeo_web: /api/v1/models/${m.id}/tileset.json`);
   closeAll();
 }
 

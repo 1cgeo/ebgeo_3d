@@ -58,6 +58,8 @@ npm run dev        # com --watch
 npm run importar   # atalho para scripts/importar.js
 npm run catalogo   # imprime o catalogo pronto para o config.tilesets
 npm run verificar  # confere um modelo importado contra a origem
+#                    (importar.js --promover --id <slug> termina uma importacao
+#                     cuja troca de arquivo travou; nao reconverte nada)
 npm run cleanup-wal
 npm test           # 21 testes (node:test)
 npm run lint

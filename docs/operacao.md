@@ -114,9 +114,24 @@ gera um token novo, então:
 - o `tiles-queries.js` confere mtime e tamanho a cada acesso e reabre a conexão
   sozinho, então **não é preciso reiniciar o serviço**.
 
-No Windows, feche o serviço antes se a substituição do arquivo falhar com
-`EPERM`: um handle aberto ainda segura o arquivo. O roteiro já fecha a conexão
-que ele mesmo conhece.
+### Reimportar no Windows com o serviço no ar
+
+**Não funciona, e o roteiro avisa.** No Linux, que é onde o container roda,
+substituir um arquivo com handle aberto é permitido: o inode antigo sobrevive até
+o último leitor fechar. No Windows o mesmo passo devolve `EBUSY`, porque o
+serviço é outro processo e segura o arquivo.
+
+Quando isso acontece o trabalho **não se perde**: a conversão já terminou e
+passou na conferência, e o `.parcial` está pronto. Pare o serviço e rode:
+
+```bash
+node scripts/importar.js --promover --id <slug>
+```
+
+O `--promover` não reconverte nada. Ele lê o cabeçalho que o passo 6 gravou no
+próprio `.parcial`, troca o arquivo e escreve o catálogo. Ele recusa um
+`.parcial` cujo cabeçalho esteja incompleto, ou cuja contagem de tiles não bata
+com o que o arquivo tem.
 
 ## Publicar e despublicar
 
@@ -175,7 +190,7 @@ abrir o modelo no EBGeo e olhar. O que checar:
 | `container "pnts" nao e convertido` | o modelo tem nuvem de pontos; ele não passa por este roteiro |
 | globo liso, modelo não aparece | URL errada no `config.js`, ou modelo com `published = 0` |
 | modelo aparece branco | KTX2 sem transcodificador no cliente, ou CesiumJS anterior a 1.83 |
-| `EPERM` ao substituir o `.3dtiles` | serviço no ar segurando o arquivo, no Windows |
+| `EBUSY` ou `EPERM` ao substituir o `.3dtiles` | serviço no ar segurando o arquivo, no Windows. Pare o serviço e use `--promover` |
 
 ## Manutenção
 
