@@ -234,7 +234,11 @@ Duas colunas saem daí:
 
 - `lon`, `lat`, `height`: o ponto de navegação.
 - `ground_height`: a altura elipsoidal do chão, a mediana das alturas dos cantos
-  dos tiles de conteúdo. Ela é DADO, e a reimportação a sobrescreve.
+  dos tiles de conteúdo.
+- `min_height`: a altura elipsoidal do ponto mais baixo. É ela que decide o
+  `heightOffset` de um cliente sem terreno.
+
+As duas são DADO, e a reimportação as sobrescreve.
 
 Modelo importado antes de 2026-08-22 tem o ponto errado ou vazio. Refaça a medida
 sem reconverter:
@@ -290,8 +294,14 @@ Na máquina sem terreno, gere o config com o contorno em vez de ajustar no olho:
 node scripts/catalogo.js --js --sem-terreno --base http://localhost:8082
 ```
 
-A opção publica `heightOffset = -ground_height`. NUNCA a use para o config de
-produção.
+A opção publica `heightOffset = -min_height`, o PONTO MAIS BAIXO do modelo.
+
+**Não use `-ground_height` aqui.** A mediana desce o modelo demais: a parte baixa
+dele fica abaixo do chão liso, o globo passa a cortá-la por dentro, e as duas
+superfícies brigam pelo mesmo pixel. Medido no Silo, base 39,5 m e mediana
+62,3 m: com `-62,3` a base caía a **−22,8 m**.
+
+NUNCA use `--sem-terreno` para o config de produção.
 
 ## Publicar e despublicar
 

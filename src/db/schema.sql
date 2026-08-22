@@ -52,6 +52,13 @@ CREATE TABLE IF NOT EXISTS models (
     --      ajuste no olho, que e o que poe modelo enterrado.
     ground_height   REAL,
 
+    -- Altura elipsoidal do PONTO MAIS BAIXO do modelo, medida pelo mesmo
+    -- envelope. E ela, e nao `ground_height`, que decide o `height_offset` de um
+    -- cliente sem terreno: com `-ground_height` a parte baixa do modelo afunda
+    -- abaixo do chao liso, o globo a corta por dentro, e as duas superficies
+    -- brigam pelo mesmo pixel. Medido no Silo: a base caia a -22,8 m.
+    min_height      REAL,
+
     -- Ajuste vertical publicado ao cliente. Com o terreno da DGEO no ar ele e 0.
     height_offset   REAL DEFAULT 0,
     max_sse         REAL,            -- maximumScreenSpaceError sugerido

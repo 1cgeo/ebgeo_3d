@@ -60,6 +60,7 @@ export function getIndexDb() {
  */
 const COLUNAS_NOVAS = [
   ['ground_height', 'REAL'],
+  ['min_height', 'REAL'],
 ];
 
 /** Adiciona as colunas que faltam ao catalogo, sem tocar nos dados. */

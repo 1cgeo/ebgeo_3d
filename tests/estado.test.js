@@ -58,7 +58,7 @@ function catalogaModelo(id, extras = {}) {
     tiles_version: '1.1', geometry_codec: 'draco', texture_codec: 'ktx2-etc1s',
     texture_quality: 200, tile_count: 1, json_count: 0, total_bytes: 1,
     source_bytes: 1, build_token: 'tok1', built_at: '2026-08-22T00:00:00Z',
-    lon: null, lat: null, height: null, ground_height: null, height_offset: null, max_sse: null,
+    lon: null, lat: null, height: null, ground_height: null, min_height: null, height_offset: null, max_sse: null,
     description: null, local: null, keywords: null,
     preview_video: null, preview_thumb: null, published: 1,
     ...extras,

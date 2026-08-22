@@ -27,8 +27,8 @@ function stmts() {
     listar: db.prepare(`
       SELECT id, name, source, captured_at, tiles_version, geometry_codec,
              texture_codec, texture_quality, tile_count, total_bytes,
-             build_token, built_at, lon, lat, height, ground_height, height_offset, max_sse,
-             description, local, keywords, preview_video, preview_thumb
+             build_token, built_at, lon, lat, height, ground_height, min_height,
+             height_offset, max_sse, description, local, keywords, preview_video, preview_thumb
         FROM models
        WHERE published = 1
        ORDER BY name
@@ -42,13 +42,14 @@ function stmts() {
         id, name, db_filename, source, source_version, captured_at,
         tiles_version, geometry_codec, texture_codec, texture_quality,
         tile_count, json_count, total_bytes, source_bytes,
-        build_token, built_at, lon, lat, height, ground_height, height_offset, max_sse,
-        description, local, keywords, preview_video, preview_thumb, published
+        build_token, built_at, lon, lat, height, ground_height, min_height,
+        height_offset, max_sse, description, local, keywords, preview_video, preview_thumb, published
       ) VALUES (
         @id, @name, @db_filename, @source, @source_version, @captured_at,
         @tiles_version, @geometry_codec, @texture_codec, @texture_quality,
         @tile_count, @json_count, @total_bytes, @source_bytes,
-        @build_token, @built_at, @lon, @lat, @height, @ground_height, @height_offset, @max_sse,
+        @build_token, @built_at, @lon, @lat, @height, @ground_height, @min_height,
+        @height_offset, @max_sse,
         @description, @local, @keywords, @preview_video, @preview_thumb, @published
       )
       ON CONFLICT(id) DO UPDATE SET
@@ -70,6 +71,7 @@ function stmts() {
         -- ground_height E MEDIDA, e por isso NAO leva COALESCE: uma reimportacao
         -- que reconverte a geometria tem de sobrescrever a altura antiga.
         ground_height=excluded.ground_height,
+        min_height=excluded.min_height,
         height_offset=COALESCE(excluded.height_offset, models.height_offset),
         max_sse=COALESCE(excluded.max_sse, models.max_sse),
         description=COALESCE(excluded.description, models.description),

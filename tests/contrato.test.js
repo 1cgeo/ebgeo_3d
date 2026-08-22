@@ -352,3 +352,20 @@ function leUnicaPosicao(glb) {
   }
   return v;
 }
+
+test('o offset sem terreno usa a BASE, e nao a mediana do chao', () => {
+  // O DEFEITO QUE ESTE TESTE TRAVA: com `heightOffset = -ground_height` a parte
+  // baixa do modelo desce abaixo do chao liso do EllipsoidTerrainProvider. O
+  // globo passa a corta-la por dentro, e as duas superficies brigam pelo mesmo
+  // pixel. Medido no Silo Oreste Ceretta: base 39,5 m, mediana 62,3 m, e com
+  // -62,3 a base caia a -22,8 m. O chefe viu o efeito na tela em 2026-08-22.
+  const envelope = { hMin: 39.5, hChao: 62.3, hMax: 110.4 };
+  const offsetCerto = -envelope.hMin;
+  const offsetErrado = -envelope.hChao;
+
+  assert.ok(envelope.hMin + offsetCerto >= 0,
+    'pela base, nada do modelo fica abaixo de zero');
+  assert.ok(envelope.hMin + offsetErrado < 0,
+    'pela mediana o modelo afunda: e este o caso que o teste guarda');
+  assert.equal(+(envelope.hMin + offsetErrado).toFixed(1), -22.8);
+});

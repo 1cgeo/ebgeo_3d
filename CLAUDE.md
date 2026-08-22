@@ -155,8 +155,14 @@ que custou trabalho.
   flutuar a própria altura elipsoidal. O catálogo guarda essa altura medida em
   `ground_height` e publica `height_offset` 0. Para a máquina sem terreno,
   `node scripts/catalogo.js --js --sem-terreno` gera o config com
-  `heightOffset = -ground_height`. NUNCA gere o config de produção com essa
-  opção, e nunca ajuste a altura no olho.
+  `heightOffset = -min_height`. NUNCA gere o config de produção com essa opção, e
+  nunca ajuste a altura no olho.
+- **O offset sem terreno usa a BASE do modelo, e nunca a mediana do chão.** Com
+  `-ground_height` a parte baixa do modelo desce abaixo do chão liso do
+  `EllipsoidTerrainProvider`. O globo passa a cortá-la por dentro, e as duas
+  superfícies brigam pelo mesmo pixel. Medido no Silo: base 39,5 m, mediana
+  62,3 m, e com `-62,3` a base caía a **−22,8 m**. O teste
+  `o offset sem terreno usa a BASE` reprova a volta.
 - **Medir no navegador com `requestAnimationFrame` não funciona.** Numa aba que
   o Chrome considera `hidden` o rAF **não dispara nenhum quadro**, e o
   `setTimeout` cai para cerca de um por segundo. Foi assim que a mesma variante

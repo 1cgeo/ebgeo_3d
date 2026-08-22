@@ -37,7 +37,8 @@ const linhas = alvos.length
   : db.prepare('SELECT * FROM models ORDER BY id').all();
 
 const atualiza = db.prepare(`
-  UPDATE models SET lon = ?, lat = ?, height = ?, ground_height = ? WHERE id = ?
+  UPDATE models SET lon = ?, lat = ?, height = ?, ground_height = ?, min_height = ?
+   WHERE id = ?
 `);
 
 let mudados = 0;
@@ -64,13 +65,15 @@ for (const m of linhas) {
     : null;
 
   console.log(`${m.id}`);
-  console.log(`  catalogo  lon ${fmt(m.lon)} lat ${fmt(m.lat)} h ${fmt(m.height)} chao ${fmt(m.ground_height)}`);
-  console.log(`  medido    lon ${e.lon.toFixed(7)} lat ${e.lat.toFixed(7)} h ${(e.hChao + 500).toFixed(1)} chao ${e.hChao.toFixed(1)}`);
+  console.log(`  catalogo  lon ${fmt(m.lon)} lat ${fmt(m.lat)} h ${fmt(m.height)}`
+    + ` chao ${fmt(m.ground_height)} base ${fmt(m.min_height)}`);
+  console.log(`  medido    lon ${e.lon.toFixed(7)} lat ${e.lat.toFixed(7)} h ${(e.hChao + 500).toFixed(1)}`
+    + ` chao ${e.hChao.toFixed(1)} base ${e.hMin.toFixed(1)}`);
   console.log(`  envelope  ${e.hMin.toFixed(1)} a ${e.hMax.toFixed(1)} m, raio ${Math.round(e.raio)} m, ${e.amostras.toLocaleString('pt-BR')} cantos`);
   if (dist != null) console.log(`  ${dist > 50 ? 'DESLOCADO' : 'desloca'} ${dist.toLocaleString('pt-BR')} m`);
 
   if (!dryRun) {
-    atualiza.run(e.lon, e.lat, e.hChao + 500, e.hChao, m.id);
+    atualiza.run(e.lon, e.lat, e.hChao + 500, e.hChao, e.hMin, m.id);
     mudados++;
   }
 }

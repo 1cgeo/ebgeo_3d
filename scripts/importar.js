@@ -513,7 +513,10 @@ async function main() {
       meta.run('lat', String(ponto.lat));
       meta.run('height', String(ponto.height));
     }
-    if (envelope) meta.run('groundHeight', String(envelope.hChao));
+    if (envelope) {
+      meta.run('groundHeight', String(envelope.hChao));
+      meta.run('minHeight', String(envelope.hMin));
+    }
   })();
   finalizarModelDb(db);
 
@@ -543,6 +546,7 @@ async function main() {
     lat: ponto ? ponto.lat : null,
     height: ponto ? ponto.height + 500 : null,
     ground_height: envelope ? envelope.hChao : null,
+    min_height: envelope ? envelope.hMin : null,
     height_offset: null,
     // Com o geometricError ja escalado no dado, o modelo NAO precisa mais de
     // maximumScreenSpaceError proprio: ele passa a se comportar bem no 16 que
@@ -710,6 +714,7 @@ function promover(id) {
     lat: m.lat != null ? Number(m.lat) : null,
     height: m.height != null ? Number(m.height) + 500 : null,
     ground_height: m.groundHeight != null ? Number(m.groundHeight) : null,
+    min_height: m.minHeight != null ? Number(m.minHeight) : null,
     height_offset: null,
     max_sse: null,
     description: null,

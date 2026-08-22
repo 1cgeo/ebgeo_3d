@@ -10,7 +10,7 @@
  *   node scripts/catalogo.js --js --base /ebgeo_3d  # trecho para o config.js
  *   node scripts/catalogo.js --js --sem-terreno     # idem, para cliente sem terreno
  *
- * `--sem-terreno` publica heightOffset = -ground_height em vez do valor do
+ * `--sem-terreno` publica heightOffset = -min_height em vez do valor do
  * catalogo. Um Cesium que nao consegue carregar o terreno cai EM SILENCIO para
  * o EllipsoidTerrainProvider: o chao vira liso na altura 0 e todo modelo passa
  * a flutuar a propria altura elipsoidal. Use so na maquina que esta nesse
@@ -40,11 +40,17 @@ if (o.js) {
       url: `${o.base}/api/v1/models/${m.id}/tileset.json`,
       id: m.id,
       name: m.name,
-      heightOffset: (o.semTerreno && m.ground_height != null)
-        ? -Number(m.ground_height.toFixed(1))
+      // `-min_height`, E NAO `-ground_height`. Descer o modelo pela MEDIANA das
+      // alturas poe a parte baixa dele ABAIXO do chao liso, o globo a corta por
+      // dentro, e as duas superficies brigam pelo mesmo pixel. Medido no Silo:
+      // com -62,3 a base caia a -22,8 m, e o chefe viu o efeito na tela.
+      // Pelo minimo, nada do modelo afunda.
+      heightOffset: (o.semTerreno && m.min_height != null)
+        ? -Number(m.min_height.toFixed(1))
         : (m.height_offset ?? 0),
     };
     if (m.ground_height != null) e.groundHeight = +m.ground_height.toFixed(1);
+    if (m.min_height != null) e.minHeight = +m.min_height.toFixed(1);
     if (m.description) e.description = m.description;
     if (m.local) e.local = m.local;
     if (m.captured_at) e.data_captura = m.captured_at;
@@ -54,7 +60,7 @@ if (o.js) {
     return e;
   });
   console.log('// gerado por scripts/catalogo.js --js'
-    + (o.semTerreno ? ' --sem-terreno (heightOffset = -ground_height)' : ''));
+    + (o.semTerreno ? ' --sem-terreno (heightOffset = -min_height)' : ''));
   console.log(`tilesets: ${JSON.stringify(entradas, null, 2)},`);
 } else {
   const { bytes, tiles } = getTotals();
@@ -66,7 +72,8 @@ if (o.js) {
       + `${`${m.geometry_codec}+${m.texture_codec}`.padEnd(18)} `
       + `${(m.build_token || '').padEnd(10)} `
       + `${m.lon != null ? `${m.lon.toFixed(4)},${m.lat.toFixed(4)}` : 'SEM PONTO'}`
-      + `${m.ground_height != null ? ` chao ${m.ground_height.toFixed(1)} m` : ''}`,
+      + `${m.ground_height != null ? ` chao ${m.ground_height.toFixed(1)}` : ''}`
+      + `${m.min_height != null ? ` base ${m.min_height.toFixed(1)} m` : ''}`,
     );
   }
   console.log(`\n${modelos.length} modelos, ${tiles.toLocaleString('pt-BR')} tiles, ${(bytes / 2 ** 30).toFixed(2)} GiB`);

@@ -31,6 +31,9 @@ function paraCatalogo(m, base) {
     // Altura elipsoidal do chao, medida. O cliente sem terreno usa
     // heightOffset = -groundHeight; ver docs/operacao.md.
     groundHeight: m.ground_height ?? undefined,
+    // Ponto mais baixo do modelo. E ele que decide o heightOffset de um cliente
+    // sem terreno: pela mediana o modelo afunda e o globo o corta.
+    minHeight: m.min_height ?? undefined,
     previewVideo: m.preview_video ?? undefined,
     previewThumbnail: m.preview_thumb ?? undefined,
   };
