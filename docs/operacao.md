@@ -252,6 +252,32 @@ node scripts/remedir.js silo-dona-francisca
 O roteiro imprime a distância entre o ponto do catálogo e o medido. Acima de 50 m
 ele marca `DESLOCADO`.
 
+## Converter o acervo inteiro
+
+```bash
+node scripts/lote.js --destino D:/modelos_3d_convertidos --dry-run
+node scripts/lote.js --destino D:/modelos_3d_convertidos
+```
+
+Um modelo por vez: copia a origem do HD para o PC, converte, **move** o
+`.3dtiles` pronto de volta ao HD e limpa o PC antes do próximo.
+
+Ler e escrever direto no HD não serve, porque são horas de I/O contínuo e o
+disco desconecta. Copiar tudo antes também não: o acervo tem 96 GiB e o PC tem
+menos que isso livre.
+
+**Pare o serviço antes.** No Windows ele segura o `.3dtiles` publicado, e a
+corrida não consegue apagá-lo do PC.
+
+O estado fica em `data/lote.json` e é gravado a cada modelo terminado.
+Interrompa quando quiser: rodar de novo retoma de onde parou. `--refazer`
+reconverte o que já está feito, e `--so N` limita a fila.
+
+Medido em 2026-08-22: **96,1 GiB de entrada, cerca de 66 GiB de saída, ~9 h**.
+
+Modelo GLB solto é PULADO, e com razão: ele precisa de `--lon` e `--lat`, que
+não estão no arquivo. Importe-o à mão depois.
+
 ## Importar uma cena navegável a pé
 
 A cena é a pasta que a pipeline de Gaussian Splatting produz. **Nada dela vai

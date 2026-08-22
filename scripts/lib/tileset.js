@@ -60,38 +60,43 @@ export const ESCALA_GE = {
 };
 
 /**
- * Teto de resolucao de textura por motor de geracao, em pixels do lado maior.
+ * Teto padrao de resolucao de textura, em pixels do lado maior.
  *
- * O DJI TERRA EXPORTA TEXTURA 1024x1024, e o Metashape 256 a 512. Medido em
- * 2026-08-22 nos dois modelos publicados, com amostra de 250 tiles cada:
+ * LIGADO EM 512 POR DECISAO DO CHEFE, em 2026-08-22, depois de ele julgar dois
+ * pares na tela e dizer que a diferenca nao e perceptivel. Antes disso o teto
+ * vinha desligado, porque ele TROCA qualidade por tamanho e a troca e do dono
+ * do acervo, nao do roteiro.
  *
- *                      bytes de textura   VRAM de textura
- *   Silo (DJI Terra)      67,8% em 1024x1024   77,5%
- *   Ponte (Metashape)      0,0%                 0,0%
+ * O QUE A TROCA COMPRA, medido em quatro modelos convertidos dos dois lados:
  *
- * E no acervo inteiro (114 modelos, amostra de 11.261 tiles): 10,7% dos pixels
- * passam de 512x512, concentrados em 7 modelos do DJI, que somam 11,2 GiB. Nos
- * modelos do Metashape a fatia fica abaixo de 22%, quase sempre abaixo de 14%.
+ *   modelo      motor       sem teto     com teto    conversao
+ *   Beira-Rio   DJI         1.556 MiB    808 MiB     880 s -> 353 s
+ *   Silo        DJI           338 MiB    214 MiB     245 s -> 118 s
+ *   Aerodromo   Metashape     821 MiB    586 MiB     369 s -> 278 s
+ *   Ponte       Metashape     294 MiB    250 MiB
  *
- * O teto e por MOTOR, e nao global, pela mesma razao da escala do
- * geometricError: e a origem que produz o excesso, e nao o acervo.
+ * SEM O TETO O ACERVO CRESCE. Nos quatro casos a saida ficou MAIOR que a
+ * origem (razao 1,13 a 1,17), porque o ETC1S e menos compacto que o JPEG que a
+ * origem usa. Com o teto os quatro encolhem. Extrapolado para os 114 modelos:
+ * 106 GiB sem teto contra cerca de 75 GiB com ele.
  *
- * ELE VEM DESLIGADO, E ISSO E DELIBERADO. Diferente da escala do
- * geometricError, que corrige um defeito da origem sem custo, o teto TROCA
- * qualidade por tamanho, e a troca aparece. Medido no Silo, com a camera a
- * cerca de 157 m:
+ * E ele compra VRAM tambem: no aerodromo a textura em GPU caiu de 12,8 para
+ * 7,3 MiB, com os MESMOS 151 tiles e 194.231 triangulos.
  *
- *   1024 (hoje)   338,4 MiB em disco   35,8 MiB de VRAM   conversao 245,4 s
- *    512          214,5 MiB (-37%)     27,3 MiB (-24%)    conversao 118,2 s
+ * Para desligar num modelo: `--max-textura 0`.
+ */
+export const MAX_TEXTURA_PADRAO = 512;
+
+/**
+ * Teto por MOTOR de geracao, para o caso de um deles precisar de outro valor.
  *
- * De longe as duas sao indistinguiveis. De perto o 512 amacia a telha do galpao
- * e apaga a divisao dos paineis solares. Quem decide essa troca e o chefe, e nao
- * o padrao do roteiro: ligue com `--max-textura 512`.
+ * Vazio significa "o padrao vale para todos". A tabela fica porque a
+ * distribuicao NAO e uniforme, e um dia pode pedir tratamento separado: medido
+ * no acervo, o teto corta 64% dos pixels no DJI Terra (que exporta 1024x1024) e
+ * 25% no Metashape (que exporta 256 a 768).
  */
 export const MAX_TEXTURA = {
-  // 'DJI Terra': 512,
 };
-
 /** Acima disto o valor e o "sempre refine" do DJI, e nao um erro de verdade. */
 const GE_ABSURDO = 1e9;
 

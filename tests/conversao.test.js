@@ -11,7 +11,8 @@ import {
 import { dimensaoAlvo } from '../scripts/lib/ktx2.js';
 import { descartaExtensoesDeTexturaAntigas } from '../scripts/lib/conversor.js';
 import {
-  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE, MAX_TEXTURA,
+  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE,
+  MAX_TEXTURA, MAX_TEXTURA_PADRAO,
 } from '../scripts/lib/tileset.js';
 
 /** Monta um glb minimo valido (so o chunk JSON). */
@@ -333,10 +334,23 @@ test('o teto e o alinhamento se aplicam nesta ordem', () => {
   assert.deepEqual(dimensaoAlvo(768, 256, 500), { largura: 500, altura: 164 });
 });
 
-test('MAX_TEXTURA vem vazio: o teto NAO se liga sozinho', () => {
-  // O teto troca qualidade por tamanho, e a troca aparece de perto. Ligar por
-  // padrao seria decidir no lugar do chefe. Ver docs/desempenho.md.
+test('o teto padrao e 512, e vale para todo motor', () => {
+  // LIGADO POR DECISAO DO CHEFE em 2026-08-22, depois de julgar dois pares na
+  // tela. Sem o teto o acervo CRESCE: os quatro modelos medidos sairam maiores
+  // que a origem (razao 1,13 a 1,17), porque o ETC1S e menos compacto que o
+  // JPEG dela. Ver a tabela em lib/tileset.js.
+  assert.equal(MAX_TEXTURA_PADRAO, 512);
+
+  // A tabela por motor fica VAZIA: o padrao vale para todos. Ela existe para o
+  // dia em que um motor precisar de outro valor, e nao para diferenciar hoje.
   assert.equal(Object.keys(MAX_TEXTURA).length, 0);
+});
+
+test('o teto padrao encolhe a textura de 1024 e nao toca a de 256', () => {
+  // Os dois extremos do acervo: o DJI Terra exporta 1024x1024, o Metashape
+  // exporta 256x256. O teto tem de agir num e ser inerte no outro.
+  assert.deepEqual(dimensaoAlvo(1024, 1024, MAX_TEXTURA_PADRAO), { largura: 512, altura: 512 });
+  assert.deepEqual(dimensaoAlvo(256, 256, MAX_TEXTURA_PADRAO), { largura: 256, altura: 256 });
 });
 
 /* ===================================================================== */

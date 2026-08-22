@@ -213,6 +213,13 @@ que custou trabalho.
   `npm test` não carrega o `.env`. O `ktxQueResponde()` aponta o próprio `node`,
   que responde `--version` em qualquer plataforma. Um `.cmd` NÃO serve: o
   `execFile` recusa arquivo de lote no Windows com EINVAL.
+- **Varrer o acervo inteiro no HD externo o derruba.** Calcular o tamanho de
+  todas as pastas custa 2,2 MILHOES de `stat`, e o disco devolveu `EIO` e
+  `ENOENT` (para um arquivo que a listagem tinha acabado de citar). O `lote.js`
+  mede uma vez e guarda no estado, e a varredura tolera erro em vez de estourar.
+- **O HD se confere a CADA modelo, e nao so no comeco.** Numa corrida de horas
+  ele cai no meio, e seguir depois disso produz falha atras de falha com a causa
+  escondida na primeira.
 - **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
   o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
   No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e

@@ -74,6 +74,12 @@ for (const arquivo of arquivos) {
   const caminho = join(config.modelsDbDir, arquivo);
   const idPeloNome = arquivo.replace(/\.3dtiles$/, '');
 
+  // QUEM JA ESTA NO CATALOGO SAI ANTES DA VALIDACAO. O cabecalho pode ser de uma
+  // versao anterior do importador e nao ter tudo que este roteiro exige, e
+  // recusar um modelo que esta servido e alarme falso: ele nao precisa ser
+  // adotado.
+  if (getModelAny(idPeloNome)) { jaEstavam++; continue; }
+
   let cab;
   try {
     cab = leCabecalho(caminho);
@@ -104,8 +110,6 @@ for (const arquivo of arquivos) {
     recusados.push(`${idPeloNome}: o cabecalho diz ${meta.tileCount} tiles e o arquivo tem ${tilesNoArquivo}`);
     continue;
   }
-
-  if (getModelAny(meta.id)) { jaEstavam++; continue; }
 
   const bytes = statSync(caminho).size;
   const altura = meta.height != null ? Number(meta.height) : null;

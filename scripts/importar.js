@@ -44,7 +44,8 @@ import { createModelDb, finalizarModelDb, getIndexDb, closeAll, closeModelDb } f
 import { upsertModel, openImport, closeImport, getModelAny } from '../src/db/queries.js';
 import { versaoKtx, QLEVEL_PADRAO } from './lib/ktx2.js';
 import {
-  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE, MAX_TEXTURA,
+  reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE,
+  MAX_TEXTURA, MAX_TEXTURA_PADRAO,
 } from './lib/tileset.js';
 import {
   tipoDeTile, abrirTile, leGerador, extensoesNaoSuportadas,
@@ -362,8 +363,10 @@ async function main() {
     closeAll();
     process.exit(4);
   }
+  // `auto` consulta a tabela por motor e cai no PADRAO quando ela nao diz nada.
+  // O padrao e 512 desde 2026-08-22: ver a razao medida em lib/tileset.js.
   const maxTextura = o.maxTextura === 'auto'
-    ? (MAX_TEXTURA[motorAmostra] || 0)
+    ? (MAX_TEXTURA[motorAmostra] ?? MAX_TEXTURA_PADRAO)
     : Number(o.maxTextura);
   log(`  motor na amostra: ${motorAmostra || 'desconhecido'}`
     + `   teto de textura: ${maxTextura ? `${maxTextura} px` : 'nenhum'}`);

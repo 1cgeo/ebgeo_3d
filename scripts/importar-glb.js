@@ -34,6 +34,7 @@ import { upsertModel, openImport, closeImport, getModelAny } from '../src/db/que
 import { versaoKtx, QLEVEL_PADRAO } from './lib/ktx2.js';
 import { criarConversor } from './lib/conversor.js';
 import { abrirTile, leGerador, extensoesNaoSuportadas } from './lib/b3dm.js';
+import { MAX_TEXTURA_PADRAO } from './lib/tileset.js';
 import { trocaArquivo } from './lib/deposito.js';
 
 /** Nome com que o GLB e servido, sempre o mesmo. */
@@ -56,7 +57,7 @@ function args() {
     escala: num('--escala', 1),
     qlevel: parseInt(v('--qlevel', String(QLEVEL_PADRAO)), 10),
     geometria: v('--geometria', 'draco'),
-    maxTextura: parseInt(v('--max-textura', '0'), 10),
+    maxTextura: parseInt(v('--max-textura', String(MAX_TEXTURA_PADRAO)), 10),
     forcar: a.includes('--forcar'),
     dryRun: a.includes('--dry-run'),
   };
