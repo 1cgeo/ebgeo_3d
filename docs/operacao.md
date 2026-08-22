@@ -52,13 +52,13 @@ cair no meio de uma corrida de horas, perde-se a corrida e não o acervo.
 
 ```bash
 # 1. reconhecimento, sem escrever nada
-node scripts/importar.js --origem "D:/modelos_3d/Ponte_Quatis" --id ponte-quatis --dry-run
+node scripts/importar.js --origem "$EBGEO3D_SOURCE_DIR/Ponte_Quatis" --id ponte-quatis --dry-run
 
 # 2. piloto de 40 tiles, para ver a razão de tamanho e a taxa antes de escalar
-node scripts/importar.js --origem "D:/modelos_3d/Ponte_Quatis" --id piloto --limite 40
+node scripts/importar.js --origem "$EBGEO3D_SOURCE_DIR/Ponte_Quatis" --id piloto --limite 40
 
 # 3. a corrida
-node scripts/importar.js --origem "D:/modelos_3d/Ponte_Quatis" \
+node scripts/importar.js --origem "$EBGEO3D_SOURCE_DIR/Ponte_Quatis" \
   --id ponte-quatis --nome "Ponte General Osório (Quatis)" --workers 12
 ```
 

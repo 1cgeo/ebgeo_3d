@@ -38,7 +38,7 @@ npm start                     # porta 8082
 Importar um modelo:
 
 ```bash
-node scripts/importar.js --origem "D:/modelos_3d/Ponte_Quatis" \
+node scripts/importar.js --origem "$EBGEO3D_SOURCE_DIR/Ponte_Quatis" \
   --id ponte-quatis --nome "Ponte General Osório (Quatis)" --workers 12
 ```
 
