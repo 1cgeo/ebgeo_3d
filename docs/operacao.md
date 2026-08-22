@@ -313,6 +313,27 @@ UPDATE models SET published = 0 WHERE id = 'ponte-quatis';
 Modelo despublicado some do catálogo e responde 404 nas rotas. O arquivo continua
 onde está.
 
+## Publicar a miniatura e o vídeo de prévia
+
+Ponha o arquivo em `data/assets/` com o NOME DO MODELO:
+
+```
+data/assets/ponte-quatis.webp    # miniatura do card do catálogo
+data/assets/ponte-quatis.webm    # vídeo de órbita
+```
+
+Nada a gravar no banco: a rota deriva a URL do slug, e só publica o campo quando
+o arquivo existe. Confira depois de copiar:
+
+```bash
+curl -s "http://localhost:8082/api/v1/models" | grep previewThumbnail
+curl -o /dev/null -s -w "%{http_code} %{content_type}
+"   "http://localhost:8082/api/v1/assets/ponte-quatis.webp"
+```
+
+O vídeo de órbita sai da ferramenta `cesium-orbit-video-generator.html` descrita
+na wiki, em [[ebgeo-3d]].
+
 ## Ligar no ebgeo_web
 
 No `src/js/config.js` do `ebgeo_web`, a entrada do tileset troca só a URL:

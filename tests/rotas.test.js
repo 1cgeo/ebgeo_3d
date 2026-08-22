@@ -8,7 +8,7 @@
 
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
@@ -39,6 +39,12 @@ before(async () => {
   db.prepare('INSERT INTO media VALUES (?,?)').run('tileset.json', Buffer.from(TILESET));
   db.prepare('INSERT INTO media VALUES (?,?)').run('Data/a.glb', GLB);
   db.close();
+
+  // UMA PREVIA no diretorio de assets, e SO PARA UM modelo. A rota deriva a URL
+  // do slug, entao o teste precisa dos dois lados: o que tem arquivo publica a
+  // URL, e o que nao tem omite o campo.
+  mkdirSync(join(raiz, 'assets'), { recursive: true });
+  writeFileSync(join(raiz, 'assets', 'teste.webp'), Buffer.from('RIFF0000WEBP', 'ascii'));
 
   app = await buildApp({ logger: false });
 
@@ -157,4 +163,38 @@ test('normalizaChave rejeita travessia e aceita caminho comum', () => {
   // chave de media com por-cento literal ficava inalcancavel.
   assert.equal(normalizaChave('%ZZ'), '%ZZ');
   assert.equal(normalizaChave('Data/100%.glb'), 'Data/100%.glb');
+});
+
+/* ===================================================================== */
+/* Previa: miniatura e video servidos como arquivo                       */
+/* ===================================================================== */
+
+test('a previa DERIVA do slug, e o modelo sem arquivo omite o campo', async () => {
+  const r = await app.inject({ method: 'GET', url: '/api/v1/models' });
+  const { tilesets } = r.json();
+  const comPrevia = tilesets.find((t) => t.id === 'teste');
+  assert.equal(comPrevia.previewThumbnail, '/api/v1/assets/teste.webp');
+  // O DEFEITO QUE ESTE TESTE TRAVA: publicar a URL para todo modelo faria o
+  // card do catalogo mostrar imagem partida, em vez de cair para o icone
+  // padrao. O `existsSync` da rota e o que separa os dois casos.
+  assert.equal(comPrevia.previewVideo, undefined, 'nao ha .webm: o campo sai fora');
+});
+
+test('a previa sai RELATIVA a base publicada', async () => {
+  const r = await app.inject({ method: 'GET', url: '/api/v1/models?base=/ebgeo_3d' });
+  const t = r.json().tilesets.find((x) => x.id === 'teste');
+  assert.equal(t.previewThumbnail, '/ebgeo_3d/api/v1/assets/teste.webp');
+});
+
+test('a rota de assets entrega o arquivo e barra a travessia', async () => {
+  const ok = await app.inject({ method: 'GET', url: '/api/v1/assets/teste.webp' });
+  assert.equal(ok.statusCode, 200);
+  assert.ok(ok.rawPayload.length > 0);
+
+  // O diretorio de assets fica DENTRO do dataDir, ao lado do index.db e dos
+  // .3dtiles. Uma travessia que escape dali serve o catalogo inteiro.
+  for (const alvo of ['/api/v1/assets/../index.db', '/api/v1/assets/..%2findex.db']) {
+    const mau = await app.inject({ method: 'GET', url: alvo });
+    assert.ok(mau.statusCode >= 400, `${alvo} devolveu ${mau.statusCode}`);
+  }
 });

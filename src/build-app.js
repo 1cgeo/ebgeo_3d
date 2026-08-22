@@ -12,6 +12,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyCompress from '@fastify/compress';
+import fastifyStatic from '@fastify/static';
+import { existsSync, mkdirSync } from 'node:fs';
 import config from './config.js';
 import { getIndexDb } from './db/connection.js';
 import healthRoutes from './routes/health.js';
@@ -57,6 +59,26 @@ export async function buildApp({ logger = true } = {}) {
   });
 
   await fastify.register(cors, { origin: config.corsOrigin });
+
+  // MINIATURA E VIDEO DE PREVIA, servidos como arquivo. Espelha o
+  // `/api/v1/thumbnails/` do ebgeo_360, e pela mesma razao: o catalogo do
+  // cliente precisa de uma imagem por modelo, e ela nao cabe num JSON.
+  //
+  // O DIRETORIO NASCE AQUI se nao existir. Sem isso o @fastify/static recusa a
+  // subir o servico inteiro por causa de um diretorio de previa vazio, e o
+  // acervo de tiles, que e o que importa, para junto.
+  if (!existsSync(config.assetsDir)) mkdirSync(config.assetsDir, { recursive: true });
+  await fastify.register(fastifyStatic, {
+    root: config.assetsDir,
+    prefix: '/api/v1/assets/',
+    // A previa nao carrega token de geracao na URL, entao ela NAO pode levar
+    // `immutable`: trocar a miniatura de um modelo tem de aparecer no cliente.
+    // Uma hora e o meio-termo entre isso e um pedido por card do catalogo.
+    cacheControl: true,
+    maxAge: 3600,
+    index: false,
+    list: false,
+  });
 
   getIndexDb();
 

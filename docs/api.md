@@ -73,6 +73,29 @@ aqui sem ele daria um caminho que responde 404 do lado de fora.
 
 Modelo com `published = 0` não aparece.
 
+## `GET /api/v1/assets/*`
+
+Miniatura e vídeo de prévia dos modelos, servidos como arquivo de
+`data/assets/`. Espelha o `/api/v1/thumbnails/` do ebgeo_360.
+
+**A prévia DERIVA DO SLUG, e não de uma coluna do catálogo.** Para publicar a
+miniatura do modelo `ponte-quatis`, ponha `data/assets/ponte-quatis.webp`. O
+vídeo é `ponte-quatis.webm`. Nada a gravar no banco.
+
+A alternativa (guardar o caminho numa coluna) duplica estado: publicar exigiria
+copiar o arquivo E gravar o caminho, e esquecer o segundo passo some com a
+imagem sem erro nenhum.
+
+O catálogo só publica o campo quando o arquivo existe. Sem isso todo modelo
+publicaria uma URL, e o card do EBGeo mostraria imagem partida em vez de cair
+para o ícone padrão.
+
+`Cache-Control: public, max-age=3600`. Uma hora, e **não** `immutable`: a URL da
+prévia não carrega token de geração, então trocar a miniatura tem de aparecer no
+cliente.
+
+---
+
 `groundHeight` é a altura elipsoidal do chão, medida na importação. O cliente que
 não tem terreno vê o modelo flutuar exatamente essa altura, e o contorno é
 publicar `heightOffset = -groundHeight`. Ver `docs/operacao.md`, "Modelo que

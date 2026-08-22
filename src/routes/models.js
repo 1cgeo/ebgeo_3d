@@ -8,8 +8,34 @@
  * e esquecer um deles some com o campo sem erro nenhum.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { listModels, getModel, listImports } from '../db/queries.js';
 import { setCatalogCacheHeaders } from '../middleware/cache.js';
+import config from '../config.js';
+
+/**
+ * Segmento publico das previas. Fonte unica do caminho: quem mexer aqui move a
+ * URL da miniatura e a do video de uma vez.
+ */
+const ASSETS_SEGMENT = '/api/v1/assets';
+
+/**
+ * A previa DERIVA DO SLUG, e nao de uma coluna do catalogo.
+ *
+ * E como o ebgeo_360 faz (`/thumbnails/{slug}.webp`), e evita o estado
+ * duplicado: com coluna, publicar uma miniatura obriga a copiar o arquivo E a
+ * gravar o caminho, e esquecer o segundo passo some com a imagem sem erro.
+ * Derivando, basta pôr o arquivo com o nome do modelo.
+ *
+ * O `existsSync` e o que separa "nao ha previa" de "ha previa quebrada": sem
+ * ele, todo modelo publicaria uma URL, e o card do catalogo mostraria imagem
+ * partida em vez de cair para o icone padrao.
+ */
+function previa(id, extensao) {
+  const arquivo = `${id}.${extensao}`;
+  return existsSync(join(config.assetsDir, arquivo)) ? `${ASSETS_SEGMENT}/${arquivo}` : undefined;
+}
 
 /**
  * Converte a linha do banco para a entrada de catalogo do EBGeo.
@@ -34,8 +60,6 @@ function paraCatalogo(m, base) {
     // Ponto mais baixo do modelo. E ele que decide o heightOffset de um cliente
     // sem terreno: pela mediana o modelo afunda e o globo o corta.
     minHeight: m.min_height ?? undefined,
-    previewVideo: m.preview_video ?? undefined,
-    previewThumbnail: m.preview_thumb ?? undefined,
   };
   if (m.keywords) {
     try { saida.keywords = JSON.parse(m.keywords); } catch { /* keywords invalido: omite */ }
@@ -46,6 +70,13 @@ function paraCatalogo(m, base) {
   // So publica o parametro quando ele foge do padrao do Cesium (16). Emitir 16
   // em toda entrada convidaria a tratar o default como decisao do modelo.
   if (m.max_sse != null && m.max_sse !== 16) saida.maximumScreenSpaceError = m.max_sse;
+
+  // A previa sai RELATIVA a base, igual ao previewThumbnail do 360: o consumidor
+  // concatena com a propria base do servico, que so ele conhece.
+  const thumb = m.preview_thumb || previa(m.id, 'webp');
+  const video = m.preview_video || previa(m.id, 'webm');
+  if (thumb) saida.previewThumbnail = `${base}${thumb}`;
+  if (video) saida.previewVideo = `${base}${video}`;
 
   saida.formato = {
     tilesVersion: m.tiles_version,
