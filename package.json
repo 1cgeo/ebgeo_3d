@@ -23,7 +23,8 @@
     "remedir": "node --env-file-if-exists=.env scripts/remedir.js",
     "importar:cena": "node --env-file-if-exists=.env scripts/importar-cena.js",
     "adotar": "node --env-file-if-exists=.env scripts/adotar.js",
-    "lote": "node --env-file-if-exists=.env scripts/lote.js"
+    "lote": "node --env-file-if-exists=.env scripts/lote.js",
+    "verificar:lote": "node --env-file-if-exists=.env scripts/verificar-lote.js"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",
