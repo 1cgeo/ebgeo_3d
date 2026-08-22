@@ -278,6 +278,45 @@ Medido em 2026-08-22: **96,1 GiB de entrada, cerca de 66 GiB de saída, ~9 h**.
 Modelo GLB solto é PULADO, e com razão: ele precisa de `--lon` e `--lat`, que
 não estão no arquivo. Importe-o à mão depois.
 
+## O acervo convertido SE BASTA
+
+Cada `.3dtiles` carrega o próprio cabeçalho, e o catálogo se reconstrói dele em
+qualquer máquina. Isso importa porque o `lote.js` move o produto para o HD e o
+apaga do PC: o `index.db` local fica com registros apontando arquivos que não
+estão mais lá, e ele é **descartável**.
+
+Numa máquina nova, com os arquivos em `<dados>/models/`:
+
+```bash
+EBGEO3D_DATA_DIR=<dados> node scripts/adotar.js
+EBGEO3D_DATA_DIR=<dados> PORT=8099 node src/server.js
+```
+
+Provado em 2026-08-22, do zero: o catálogo nasceu com os dois modelos e o ponto
+de navegação de cada um, o `tileset.json` respondeu, e um tile voltou com
+`model/gltf-binary`, `glTF` nos primeiros bytes e `immutable` de um ano.
+
+**Não copie o `index.db` entre máquinas.** Ele guarda `db_filename` e o que o
+operador editou (descrição, palavras-chave). Reconstruí-lo pelo `adotar` é mais
+seguro, e o que se perde é só a edição manual, que se refaz pelo
+`scripts/metadados.js`.
+
+## Conferir o lote, um a um
+
+```bash
+node scripts/verificar-lote.js --destino D:/modelos_3d_convertidos
+node scripts/verificar-lote.js --destino ... --relatorio conferencia.json
+```
+
+Oito perguntas por modelo, e sete cobrem a extensão inteira da escrita:
+integridade do SQLite, cabeçalho completo, contagem do banco contra a do
+cabeçalho, `tileset.json` de raiz em 1.1, **toda** referência resolvendo,
+conteúdo glTF com Draco e KTX2 dentro do teto, envelope geodésico fechando, e a
+contagem contra a ORIGEM.
+
+Só a leitura do conteúdo de tile é por amostra, e o tamanho dela sai no
+relatório.
+
 ## Importar uma cena navegável a pé
 
 A cena é a pasta que a pipeline de Gaussian Splatting produz. **Nada dela vai
