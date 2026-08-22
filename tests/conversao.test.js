@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { abrirTile, tipoDeTile, leGerador } from '../scripts/lib/b3dm.js';
-import { reescreveTileset, pontoDeNavegacao } from '../scripts/lib/tileset.js';
+import { reescreveTileset, pontoDeNavegacao, ESCALA_GE } from '../scripts/lib/tileset.js';
 
 /** Monta um glb minimo valido (so o chunk JSON). */
 function glbFalso(json = { asset: { version: '2.0' } }) {
@@ -150,4 +150,41 @@ test('leGerador devolve null em vez de estourar com entrada estranha', () => {
   assert.equal(leGerador(Buffer.from('nao e glb')), null);
   assert.equal(leGerador(glbFalso({ asset: { version: '2.0' } })), null);
   assert.equal(leGerador(Buffer.alloc(0)), null);
+});
+
+test('a escala do geometricError deixa o "sempre refine" do DJI intacto', () => {
+  const entrada = {
+    asset: { version: '1.0' },
+    geometricError: 1527.47,
+    root: {
+      geometricError: 10000000000,          // o "sempre refine" do DJI
+      content: { uri: 'Block/x.json' },
+      children: [
+        { geometricError: 6.193, content: { uri: 'a.b3dm' } },
+        { geometricError: 0.048, content: { uri: 'b.b3dm' } },
+      ],
+    },
+  };
+  const r = reescreveTileset(entrada, 'tok', { escalaGe: 16 });
+
+  assert.equal(r.json.geometricError, 1527.47 * 16);
+  assert.equal(r.json.root.geometricError, 10000000000,
+    'multiplicar o 1e10 nao muda o comportamento e so suja o arquivo');
+  assert.ok(Math.abs(r.json.root.children[0].geometricError - 6.193 * 16) < 1e-9);
+  assert.ok(Math.abs(r.json.root.children[1].geometricError - 0.048 * 16) < 1e-9);
+  assert.equal(r.escalados, 3, 'os tres finitos, e nao o 1e10');
+});
+
+test('sem escala o geometricError nao e tocado', () => {
+  const r = reescreveTileset({ asset: { version: '1.1' }, root: { geometricError: 7.221, content: { uri: 'a.glb' } } }, 'tok');
+  assert.equal(r.json.root.geometricError, 7.221);
+  assert.equal(r.escalados, 0);
+});
+
+test('o fator do DJI Terra e 16, e so ele tem fator', () => {
+  // O 16 nao e escolha de gosto: e o mesmo divisor que o config de producao
+  // aplicava a mao no maximumScreenSpaceError dos 6 modelos do DJI.
+  assert.equal(ESCALA_GE['DJI Terra'], 16);
+  assert.equal(ESCALA_GE['Agisoft Metashape'], undefined,
+    'o Metashape escala o geometricError certo e nao pode ser tocado');
 });

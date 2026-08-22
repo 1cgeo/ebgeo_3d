@@ -29,10 +29,45 @@
 const CONTEUDO = /\.(b3dm|glb|gltf|pnts|i3dm|cmpt|json|subtree)$/i;
 
 /**
+ * Fator de correcao do geometricError por motor de geracao.
+ *
+ * O DJI TERRA SUBESTIMA O ERRO GEOMETRICO DOS SEUS TILES. Medido no Silo contra
+ * a Ponte de Quatis, com o modelo do DJI sendo 1,65x MAIOR:
+ *
+ *                     mediana   maximo
+ *   Agisoft Metashape   0,226    57,768
+ *   DJI Terra           0,048     6,193
+ *
+ * O efeito no CesiumJS: o erro de tela de cada tile fica pequeno demais, o
+ * refinamento para cedo e o modelo aparece grosseiro. O contorno que a DGEO usa
+ * hoje e publicar `maximumScreenSpaceError: 1` nos 6 modelos do DJI, contra o
+ * 16 dos outros 91, e isso e uma pegadinha que o operador tem de lembrar modelo
+ * a modelo.
+ *
+ * Escalar o geometricError por 16 na conversao e MATEMATICAMENTE EQUIVALENTE a
+ * dividir o SSE por 16, e move a correcao do config para o dado. Medido, e a
+ * igualdade e exata:
+ *
+ *   original,      SSE  1 -> 91 tiles, 481.173 triangulos, 40,3 MiB
+ *   escalado x16,  SSE 16 -> 91 tiles, 481.173 triangulos, 40,3 MiB
+ *
+ * O 1e10 que o DJI grava no root de cada tileset externo NAO e a causa: trocar
+ * so ele nao mudou nada (8 tiles antes e depois, com SSE 16). Ele fica de fora
+ * da escala, porque ja e o "sempre refine" e multiplicar nao muda isso.
+ */
+export const ESCALA_GE = {
+  'DJI Terra': 16,
+};
+
+/** Acima disto o valor e o "sempre refine" do DJI, e nao um erro de verdade. */
+const GE_ABSURDO = 1e9;
+
+/**
  * @typedef {object} Resultado
  * @property {object} json      - O tileset reescrito
  * @property {string[]} uris    - Chaves referenciadas, ja normalizadas e sem query
  * @property {number} trocadas  - Quantas uris mudaram de .b3dm para .glb
+ * @property {number} escalados - Quantos geometricError foram escalados
  * @property {boolean} mudou
  */
 
@@ -43,12 +78,25 @@ const CONTEUDO = /\.(b3dm|glb|gltf|pnts|i3dm|cmpt|json|subtree)$/i;
  * @param {string} token - Token de geracao do modelo
  * @param {object} [opcoes]
  * @param {boolean} [opcoes.converterB3dm] - true quando os tiles viraram .glb
+ * @param {number} [opcoes.escalaGe] - fator aplicado a todo geometricError finito
  * @returns {Resultado}
  */
-export function reescreveTileset(json, token, { converterB3dm = true } = {}) {
+export function reescreveTileset(json, token, { converterB3dm = true, escalaGe = 1 } = {}) {
   let mudou = false;
   let trocadas = 0;
+  let escalados = 0;
   const uris = [];
+
+  /** Escala um geometricError, deixando o "sempre refine" do DJI intacto. */
+  function escala(t) {
+    if (escalaGe === 1) return;
+    const g = t.geometricError;
+    if (typeof g === 'number' && g < GE_ABSURDO) {
+      t.geometricError = g * escalaGe;
+      escalados++;
+      mudou = true;
+    }
+  }
 
   if (json.asset) {
     if (json.asset.version !== '1.1') {
@@ -92,6 +140,7 @@ export function reescreveTileset(json, token, { converterB3dm = true } = {}) {
 
   function percorre(tile) {
     if (!tile || typeof tile !== 'object') return;
+    escala(tile);
 
     // TILING IMPLICITO SAI ANTES DE QUALQUER TROCA. Ele nao lista tile por tile:
     // os templates de subtree e de conteudo levam {level}/{x}/{y}, e a
@@ -107,8 +156,9 @@ export function reescreveTileset(json, token, { converterB3dm = true } = {}) {
     if (Array.isArray(tile.children)) tile.children.forEach(percorre);
   }
 
+  escala(json);          // o geometricError do documento, fora do root
   percorre(json.root);
-  return { json, uris, trocadas, mudou };
+  return { json, uris, trocadas, escalados, mudou };
 }
 
 /**

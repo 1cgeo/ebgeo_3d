@@ -43,7 +43,7 @@ import config from '../src/config.js';
 import { createModelDb, finalizarModelDb, getIndexDb, closeAll, closeModelDb } from '../src/db/connection.js';
 import { upsertModel, openImport, closeImport, getModelAny } from '../src/db/queries.js';
 import { versaoKtx, QLEVEL_PADRAO } from './lib/ktx2.js';
-import { reescreveTileset, pontoDeNavegacao } from './lib/tileset.js';
+import { reescreveTileset, pontoDeNavegacao, ESCALA_GE } from './lib/tileset.js';
 import { tipoDeTile } from './lib/b3dm.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -81,6 +81,7 @@ function args() {
     workers: parseInt(v('--workers', String(Math.max(1, Math.min(12, availableParallelism() - 2)))), 10),
     qlevel: parseInt(v('--qlevel', String(QLEVEL_PADRAO)), 10),
     geometria: v('--geometria', 'draco'),
+    escalaGe: v('--escala-ge', 'auto'),
     limite: v('--limite') ? parseInt(v('--limite'), 10) : null,
     forcar: a.includes('--forcar'),
     promover: a.includes('--promover'),
@@ -366,11 +367,21 @@ async function main() {
   }
 
   passo('4. reescrita dos tileset.json');
+  // A ESCALA SAI DO MOTOR MEDIDO, e nao do nome da pasta. `auto` aplica o fator
+  // que ESCALA_GE conhece para o gerador que a conversao leu do proprio glTF.
+  const escalaGe = o.escalaGe === 'auto'
+    ? (ESCALA_GE[conv.gerador] || 1)
+    : Number(o.escalaGe);
+  if (escalaGe !== 1) {
+    log(`  geometricError sera escalado por ${escalaGe} (motor: ${conv.gerador || 'desconhecido'})`);
+    log('  isso substitui o maximumScreenSpaceError 1 no config: ver docs/formato.md');
+  }
   const inserir = db.prepare('INSERT OR REPLACE INTO media (key, content) VALUES (?, ?)');
   const gravarJson = db.transaction((linhas) => { for (const [k, v] of linhas) inserir.run(k, v); });
   const referenciadas = new Set();
   const linhasJson = [];
   let urisTrocadas = 0;
+  let geEscalados = 0;
   let raizJson = null;
 
   for (const rel of inv.copias) {
@@ -386,8 +397,9 @@ async function main() {
       fecharComFalha(db, temporario, importId, o, conv, `JSON invalido em ${rel}: ${err.message}`);
       return;
     }
-    const r = reescreveTileset(json, token);
+    const r = reescreveTileset(json, token, { escalaGe });
     urisTrocadas += r.trocadas;
+    geEscalados += r.escalados || 0;
     // As uris sao relativas AO PROPRIO tileset: um "Data/c00.glb" dentro de
     // "Data/d000/tileset.json" aponta "Data/d000/Data/c00.glb". Resolver contra
     // a raiz daria uma chave que nao existe, e a conferencia acusaria falso.
@@ -398,6 +410,7 @@ async function main() {
   }
   gravarJson(linhasJson);
   log(`  ${inv.copias.length} arquivos, ${urisTrocadas.toLocaleString('pt-BR')} uris de .b3dm para .glb, token ${token}`);
+  if (escalaGe !== 1) log(`  ${geEscalados.toLocaleString('pt-BR')} geometricError escalados por ${escalaGe}`);
 
   passo('5. conferencia');
   const temChave = db.prepare('SELECT 1 FROM media WHERE key = ?');
@@ -434,6 +447,7 @@ async function main() {
     meta.run('name', o.nome || o.id);
     meta.run('tilesVersion', '1.1');
     meta.run('geometry', o.geometria);
+    meta.run('escalaGe', String(escalaGe));
     meta.run('texture', 'ktx2-etc1s');
     meta.run('textureQuality', String(o.qlevel));
     meta.run('buildToken', token);
@@ -478,6 +492,9 @@ async function main() {
     lat: ponto ? ponto.lat : null,
     height: ponto ? ponto.height + 500 : null,
     height_offset: null,
+    // Com o geometricError ja escalado no dado, o modelo NAO precisa mais de
+    // maximumScreenSpaceError proprio: ele passa a se comportar bem no 16 que
+    // o ebgeo_web usa por padrao.
     max_sse: null,
     description: null,
     local: null,

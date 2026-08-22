@@ -150,6 +150,43 @@ o que separa a URL do tile velho da do novo, e quem o consome é o cache. Compar
 o token com o do banco recusaria o pedido do cliente que ainda segura o
 `tileset.json` anterior, e pintaria a cena de buraco em vez de servir o tile bom.
 
+## A correção do `geometricError` do DJI Terra
+
+**O DJI Terra subestima o erro geométrico dos seus tiles**, e o CesiumJS para de
+refinar cedo por causa disso: o modelo aparece grosseiro. Medido no Silo contra a
+Ponte de Quatis, com o modelo do DJI sendo **1,65× maior**:
+
+| motor | mediana | máximo |
+|---|---|---|
+| Agisoft Metashape | 0,226 | 57,768 |
+| DJI Terra | **0,048** | **6,193** |
+
+O contorno em produção era publicar `maximumScreenSpaceError: 1` nesses modelos,
+contra o 16 dos outros 91. Funciona, mas é uma pegadinha que o operador tem de
+lembrar modelo a modelo, e some no dia em que alguém copiar a entrada errada.
+
+**A conversão passa a escalar o `geometricError` por 16 quando o motor é DJI
+Terra.** É matematicamente equivalente a dividir o SSE por 16, e a igualdade foi
+medida, exata:
+
+| | tiles | triângulos | VRAM |
+|---|---|---|---|
+| original, SSE 1 | 91 | 481.173 | 40,3 MiB |
+| escalado ×16, **SSE 16** | **91** | **481.173** | **40,3 MiB** |
+
+Com isso o config volta a ser uniforme: **todo modelo usa o padrão 16**, e a
+correção vive no dado, feita uma vez.
+
+O fator sai de `ESCALA_GE`, indexado pelo `asset.generator` que a conversão lê do
+próprio glTF. O Metashape não tem fator, porque escala o erro corretamente.
+
+### O que NÃO era a causa
+
+O DJI grava `geometricError: 10000000000` no root de cada tileset externo, em
+toda profundidade, e essa era a hipótese óbvia. **Trocar só isso não mudou nada:**
+8 tiles com SSE 16 antes e depois. Aquele valor é o "sempre refine" do nó de
+estrutura, e a escala o deixa intacto de propósito.
+
 ## O empacotamento: um SQLite por modelo
 
 O acervo em árvore de arquivos tem **2.261.536 arquivos** com média de 44,2 KiB.
