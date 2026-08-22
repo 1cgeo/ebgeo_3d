@@ -108,6 +108,57 @@ cullWithChildrenBounds: true,   cullRequestsWhileMoving: true,
 cullRequestsWhileMovingMultiplier: 60.0, foveatedScreenSpaceError: true,
 ```
 
+### Dez dos quinze são o próprio default
+
+Lidos do objeto `Cesium3DTileset` do CesiumJS 1.138, sem passar opção nenhuma:
+
+| parâmetro | EBGeo | default | |
+|---|---|---|---|
+| `maximumScreenSpaceError` | 16 | 16 | igual |
+| `preferLeaves` | false | false | igual |
+| `baseScreenSpaceError` | 1024 | 1024 | igual |
+| `skipScreenSpaceErrorFactor` | 16 | 16 | igual |
+| `skipLevels` | 1 | 1 | igual |
+| `dynamicScreenSpaceError` | true | true | igual |
+| `dynamicScreenSpaceErrorHeightFalloff` | 0,25 | 0,25 | igual |
+| `cullWithChildrenBounds` | true | true | igual |
+| `cullRequestsWhileMoving` | true | true | igual |
+| `cullRequestsWhileMovingMultiplier` | 60 | 60 | igual |
+| `foveatedScreenSpaceError` | true | true | igual |
+| **`skipLevelOfDetail`** | **true** | **false** | difere |
+| **`cacheBytes`** | **1 GiB** | **512 MiB** | 2× |
+| **`dynamicScreenSpaceErrorDensity`** | **0,00278** | **0,0002** | 13,9× |
+| **`dynamicScreenSpaceErrorFactor`** | **2,0** | **24** | 12× menor |
+
+Repetir o default não muda comportamento, mas custa: quem lê a lista supõe que
+há decisão medida atrás de cada linha, e o que difere de verdade se esconde no
+meio. **As onze linhas iguais ao default podem sair**, e as quatro que restam
+ficam visíveis.
+
+### O `skipLevelOfDetail` está ajudando
+
+Medido no Silo, mesma câmera, SSE 16:
+
+| conjunto | tiles | triângulos | VRAM |
+|---|---|---|---|
+| EBGeo hoje | **92** | 481.173 | **40,5 MiB** |
+| só os defaults do Cesium | 109 | 481.173 | 45,2 MiB |
+
+**Mesma geometria visível com 17 tiles a menos e 4,7 MiB a menos.** O
+`skipLevelOfDetail` pula os níveis intermediários, então o mesmo detalhe custa
+menos residência. O Cesium desligou essa opção por padrão na 1.67 por causa do
+artefato de ancestral aparecendo através enquanto os filhos carregam, e esse
+artefato é o preço: **é ele que precisa ser julgado na tela**, não o número.
+
+### Os dois `dynamicScreenSpaceError` continuam sem medida
+
+`Density` 13,9× maior e `Factor` 12× menor que o padrão. Os dois valores vêm de
+um exemplo do Cesium para tileset de cidade visto do horizonte, e a própria
+documentação diz que a opção serve "for street-level horizon views". Um modelo
+isolado, visto de fora, não tem horizonte. **Não medi se ajudam, atrapalham ou
+são inertes aqui**, e a medida travou pelo mesmo estrangulamento de aba descrito
+acima.
+
 **`skipLevelOfDetail: true` muda tudo, e por isso uma medida sem ele mente.**
 Medi o SSE duas vezes, e a diferença entre as duas foi só essa opção:
 
