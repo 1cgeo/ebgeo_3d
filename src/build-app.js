@@ -19,6 +19,7 @@ import { getIndexDb } from './db/connection.js';
 import healthRoutes from './routes/health.js';
 import modelRoutes from './routes/models.js';
 import tileRoutes from './routes/tiles.js';
+import sceneRoutes from './routes/scenes.js';
 
 /** Corpo de requisicao: este servico so le, entao 8 KB e folgado. */
 const BODY_LIMIT_BYTES = 8 * 1024;
@@ -80,10 +81,32 @@ export async function buildApp({ logger = true } = {}) {
     list: false,
   });
 
+  // CENAS: uma pasta por cena, servida como arquivo.
+  //
+  // `decorateReply: false` porque o @fastify/static so pode decorar a resposta
+  // com `sendFile` UMA vez, e o registro das previas acima ja o fez. Sem isso o
+  // segundo registro derruba o servico na partida.
+  if (!existsSync(config.scenesDir)) mkdirSync(config.scenesDir, { recursive: true });
+  await fastify.register(fastifyStatic, {
+    root: config.scenesDir,
+    prefix: '/api/v1/scenes/',
+    decorateReply: false,
+    // O splat e o octree sao imutaveis dentro de uma cena, mas a URL deles NAO
+    // carrega token de geracao: reimportar a cena troca os bytes sem trocar o
+    // endereco. Uma hora, como as previas, e nao um ano.
+    cacheControl: true,
+    maxAge: 3600,
+    index: false,
+    list: false,
+    // `acceptRanges` fica LIGADO (e o padrao): o visualizador le o `voxel.bin`
+    // em faixa, e sem isso ele baixaria o octree inteiro para ler o cabecalho.
+  });
+
   getIndexDb();
 
   await fastify.register(healthRoutes);
   await fastify.register(modelRoutes);
+  await fastify.register(sceneRoutes);
   await fastify.register(tileRoutes);
 
   return fastify;

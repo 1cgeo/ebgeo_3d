@@ -158,3 +158,87 @@ export function closeImport(row) {
 export function listImports(modelId, limite = 5) {
   return stmts().ultimosImports.all(modelId, limite);
 }
+
+/* ===================================================================== */
+/* Cenas navegaveis a pe                                                 */
+/* ===================================================================== */
+
+/**
+ * Consultas de cena, preparadas sob demanda.
+ *
+ * SEPARADAS DAS DE MODELO, e nao no mesmo objeto, porque um catalogo pode
+ * existir sem nenhuma cena: preparar `SELECT ... FROM scenes` na primeira
+ * chamada de `listModels` faria a tabela ausente derrubar a rota errada.
+ */
+let _cenas = null;
+let _cenasDb = null;
+
+function cenas() {
+  const db = getIndexDb();
+  if (_cenas && _cenasDb === db) return _cenas;
+  _cenasDb = db;
+  _cenas = {
+    listar: db.prepare('SELECT * FROM scenes WHERE published = 1 ORDER BY name'),
+    porId: db.prepare('SELECT * FROM scenes WHERE id = ? AND published = 1'),
+    porIdQualquer: db.prepare('SELECT * FROM scenes WHERE id = ?'),
+    contar: db.prepare('SELECT COUNT(*) AS n FROM scenes WHERE published = 1'),
+    upsert: db.prepare(`
+      INSERT INTO scenes (
+        id, name, description, local, captured_at, keywords, lon, lat,
+        pose_x, pose_y, pose_z, pose_yaw, pose_pitch, velocidade, fov,
+        bytes, file_count, imported_at, published
+      ) VALUES (
+        @id, @name, @description, @local, @captured_at, @keywords, @lon, @lat,
+        @pose_x, @pose_y, @pose_z, @pose_yaw, @pose_pitch, @velocidade, @fov,
+        @bytes, @file_count, @imported_at, @published
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name,
+        -- O QUE O OPERADOR EDITOU NAO SE PERDE numa reimportacao que nao o
+        -- traga, pela mesma razao dos modelos.
+        description=COALESCE(excluded.description, scenes.description),
+        local=COALESCE(excluded.local, scenes.local),
+        captured_at=COALESCE(excluded.captured_at, scenes.captured_at),
+        keywords=COALESCE(excluded.keywords, scenes.keywords),
+        lon=COALESCE(excluded.lon, scenes.lon),
+        lat=COALESCE(excluded.lat, scenes.lat),
+        pose_x=COALESCE(excluded.pose_x, scenes.pose_x),
+        pose_y=COALESCE(excluded.pose_y, scenes.pose_y),
+        pose_z=COALESCE(excluded.pose_z, scenes.pose_z),
+        pose_yaw=COALESCE(excluded.pose_yaw, scenes.pose_yaw),
+        pose_pitch=COALESCE(excluded.pose_pitch, scenes.pose_pitch),
+        velocidade=COALESCE(excluded.velocidade, scenes.velocidade),
+        fov=COALESCE(excluded.fov, scenes.fov),
+        -- Estes tres sao MEDIDOS na importacao, e por isso sobrescrevem.
+        bytes=excluded.bytes,
+        file_count=excluded.file_count,
+        imported_at=excluded.imported_at
+    `),
+  };
+  return _cenas;
+}
+
+/** @returns {object[]} Cenas publicadas, em ordem de nome. */
+export function listScenes() {
+  return cenas().listar.all();
+}
+
+/** @param {string} id @returns {object|undefined} */
+export function getScene(id) {
+  return cenas().porId.get(id);
+}
+
+/** Inclusive a nao publicada. @param {string} id @returns {object|undefined} */
+export function getSceneAny(id) {
+  return cenas().porIdQualquer.get(id);
+}
+
+/** @returns {number} Quantidade de cenas publicadas. Usado pelo /health. */
+export function getSceneCount() {
+  return cenas().contar.get().n;
+}
+
+/** @param {object} c Linha completa de scenes. */
+export function upsertScene(c) {
+  cenas().upsert.run(c);
+}

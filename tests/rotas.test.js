@@ -17,7 +17,7 @@ const raiz = mkdtempSync(join(tmpdir(), 'ebgeo3d-teste-'));
 process.env.EBGEO3D_DATA_DIR = raiz;
 
 const { buildApp } = await import('../src/build-app.js');
-const { upsertModel } = await import('../src/db/queries.js');
+const { upsertModel, upsertScene } = await import('../src/db/queries.js');
 const { closeAll } = await import('../src/db/connection.js');
 const { resetTileStatements } = await import('../src/db/tiles-queries.js');
 const { normalizaChave } = await import('../src/routes/tiles.js');
@@ -46,6 +46,12 @@ before(async () => {
   mkdirSync(join(raiz, 'assets'), { recursive: true });
   writeFileSync(join(raiz, 'assets', 'teste.webp'), Buffer.from('RIFF0000WEBP', 'ascii'));
 
+  // UMA CENA no diretorio de cenas, com o layout minimo que o contrato exige.
+  mkdirSync(join(raiz, 'scenes', 'cena-teste', 'voxel'), { recursive: true });
+  writeFileSync(join(raiz, 'scenes', 'cena-teste', 'cena.sog'), Buffer.alloc(64, 7));
+  writeFileSync(join(raiz, 'scenes', 'cena-teste', 'voxel', 'voxel.bin'), Buffer.alloc(256, 3));
+  writeFileSync(join(raiz, 'scenes', 'cena-teste', 'voxel', 'voxel-meta.json'), '{"n":1}');
+
   app = await buildApp({ logger: false });
 
   upsertModel({
@@ -60,6 +66,15 @@ before(async () => {
     description: null, local: null, keywords: '["ponte"]',
     preview_video: null, preview_thumb: null, published: 1,
   });
+  upsertScene({
+    id: 'cena-teste', name: 'Cena de teste',
+    description: 'uma cena', local: 'Porto Alegre, RS', captured_at: '04/08/2026',
+    keywords: '["museu"]', lon: -51.2, lat: -30.03,
+    pose_x: 1, pose_y: 2, pose_z: 3, pose_yaw: 0, pose_pitch: 0,
+    velocidade: 2.4, fov: 60, bytes: 320, file_count: 3,
+    imported_at: '2026-08-22T00:00:00Z', published: 1,
+  });
+
   upsertModel({
     id: 'oculto', name: 'Nao publicado', db_filename: 'teste.3dtiles',
     source: null, source_version: null, captured_at: null,
@@ -72,6 +87,64 @@ before(async () => {
     description: null, local: null, keywords: null,
     preview_video: null, preview_thumb: null, published: 0,
   });
+});
+
+test('o catalogo de cenas sai no formato do config.firstPerson3d', async () => {
+  const r = await app.inject({ method: 'GET', url: '/api/v1/scenes.json' });
+  assert.equal(r.statusCode, 200);
+  const { count, scenes } = r.json();
+  assert.equal(count, 1);
+  const c = scenes[0];
+  assert.equal(c.id, 'cena-teste');
+  assert.equal(c.basePath, '/scenes/cena-teste');
+  assert.deepEqual(c.locate, { lon: -51.2, lat: -30.03 });
+  assert.deepEqual(c.poseInicial, { x: 1, y: 2, z: 3, yaw: 0, pitch: 0 });
+  assert.deepEqual(c.keywords, ['museu']);
+});
+
+test('o basePath sai RELATIVO a base publicada', async () => {
+  const r = await app.inject({ method: 'GET', url: '/api/v1/scenes.json?base=/ebgeo_3d' });
+  assert.equal(r.json().scenes[0].basePath, '/ebgeo_3d/scenes/cena-teste');
+});
+
+test('a poseInicial so sai INTEIRA, ou nao sai', async () => {
+  // Publicar uma pose pela metade poria o visitante dentro do chao ou
+  // flutuando, e o visualizador nao tem como saber que faltou um eixo.
+  upsertScene({
+    id: 'meia-pose', name: 'Pose incompleta', description: null, local: null,
+    captured_at: null, keywords: null, lon: null, lat: null,
+    pose_x: 1, pose_y: 2, pose_z: null, pose_yaw: null, pose_pitch: null,
+    velocidade: null, fov: null, bytes: 0, file_count: 0,
+    imported_at: '2026-08-22T00:00:00Z', published: 1,
+  });
+  const r = await app.inject({ method: 'GET', url: '/api/v1/scenes.json' });
+  const c = r.json().scenes.find((x) => x.id === 'meia-pose');
+  assert.equal(c.poseInicial, undefined, 'pose pela metade nao se publica');
+});
+
+test('os arquivos da cena sao servidos, e o octree aceita FAIXA', async () => {
+  const splat = await app.inject({ method: 'GET', url: '/api/v1/scenes/cena-teste/cena.sog' });
+  assert.equal(splat.statusCode, 200);
+  assert.equal(splat.rawPayload.length, 64);
+
+  // O visualizador le o `voxel.bin` em faixa. Sem `Accept-Ranges` ele baixaria
+  // o octree inteiro so para ler o cabecalho.
+  const faixa = await app.inject({
+    method: 'GET',
+    url: '/api/v1/scenes/cena-teste/voxel/voxel.bin',
+    headers: { range: 'bytes=0-9' },
+  });
+  assert.equal(faixa.statusCode, 206, 'a rota tem de responder 206 a um Range');
+  assert.equal(faixa.rawPayload.length, 10);
+});
+
+test('a cena nao lista o diretorio nem deixa subir', async () => {
+  const lista = await app.inject({ method: 'GET', url: '/api/v1/scenes/cena-teste/voxel/' });
+  assert.ok(lista.statusCode >= 400, `listagem devolveu ${lista.statusCode}`);
+
+  // O diretorio de cenas fica DENTRO do dataDir, ao lado do index.db.
+  const sobe = await app.inject({ method: 'GET', url: '/api/v1/scenes/cena-teste/../../index.db' });
+  assert.ok(sobe.statusCode >= 400, `travessia devolveu ${sobe.statusCode}`);
 });
 
 after(async () => {

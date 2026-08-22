@@ -252,6 +252,56 @@ node scripts/remedir.js silo-dona-francisca
 O roteiro imprime a distância entre o ponto do catálogo e o medido. Acima de 50 m
 ele marca `DESLOCADO`.
 
+## Importar uma cena navegável a pé
+
+A cena é a pasta que a pipeline de Gaussian Splatting produz. **Nada dela vai
+para SQLite**: o splat passa de 20 MB, o visualizador pede os arquivos um a um, e
+lê o octree EM FAIXA. O sistema de arquivos faz isso melhor que um BLOB, e aqui
+não há os milhares de objetos pequenos que o `.3dtiles` existe para resolver.
+
+```bash
+node scripts/importar-cena.js --origem <pasta da cena> --id museu-1cgeo   --nome "Sala Histórica General Malan"   --descricao "..." --local "Porto Alegre, RS" --data-captura "04/08/2026"   --keywords "museu,acervo"   --lon -51.2 --lat -30.03   --pose "3.82,0.55,1.42,0,0" --velocidade 2.4 --fov 60
+```
+
+Nada é convertido: o `.sog` e o octree são formato de outra pipeline, e
+reescrevê-los aqui seria decidir por ela. A cópia é byte a byte, e a conferência
+é por `sha256` de cada arquivo, na origem e no destino.
+
+### O layout da pasta é contrato
+
+```
+cena.sog                  o splat
+voxel/voxel-meta.json     cabeçalho do octree de colisão
+voxel/voxel.bin           corpo do octree
+marcadores.json           fichas curadas
+itens/                    fotos das fichas
+preview/preview.webm      vídeo do cartão do catálogo
+preview/thumbnail.jpg     capa do cartão
+```
+
+Os três primeiros são **obrigatórios**, e o roteiro recusa sem eles. Sem o splat
+não há o que ver. Sem o octree a cena abre bonita e o visitante atravessa
+parede, sem nada no console.
+
+### A pose inicial se mede, não se estima
+
+`--pose "x,y,z,yaw,pitch"` sai do octree. Mexer nela sem remedir põe o visitante
+dentro do chão ou flutuando. A rota só publica a pose quando os cinco valores
+existem: publicar meia pose seria pior que não publicar.
+
+### Conferir depois
+
+```bash
+curl -s "http://localhost:8082/api/v1/scenes.json" | python -m json.tool
+curl -o /dev/null -s -w "%{http_code}
+" "http://localhost:8082/api/v1/scenes/museu-1cgeo/cena.sog"
+curl -o /dev/null -s -w "%{http_code}
+" -H "Range: bytes=0-99"   "http://localhost:8082/api/v1/scenes/museu-1cgeo/voxel/voxel.bin"
+```
+
+O último tem de responder **206**, e não 200: o visualizador lê o octree em
+faixa, e sem isso ele baixaria o arquivo inteiro para ler o cabeçalho.
+
 ## Importar um modelo GLB solto
 
 Arquivo único, sem árvore e sem `tileset.json`. O CesiumJS o carrega por

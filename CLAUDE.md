@@ -190,6 +190,15 @@ que custou trabalho.
   convertia um glb de verdade e falhava sempre com `texturas: 0, falhas: 1`,
   acusando o conversor por um binário ausente. O conserto foi extrair a lógica
   para função pura e testá-la com um `Document` do glTF-Transform.
+- **O `@fastify/static` só decora a resposta UMA vez.** Um segundo registro sem
+  `decorateReply: false` derruba o serviço na partida. São dois hoje: as prévias
+  em `/api/v1/assets/` e as cenas em `/api/v1/scenes/`.
+- **O catálogo de cenas leva `.json` no caminho.** `/api/v1/scenes` sem extensão
+  colidiria com o prefixo estático que serve as pastas, e o vencedor dependeria
+  da ordem de registro dos plugins.
+- **`Accept-Ranges` na rota de cenas não é detalhe.** O visualizador lê o
+  `voxel.bin` em faixa, e sem isso baixaria o octree inteiro para ler o
+  cabeçalho. Um `Range` tem de devolver 206, e há teste.
 - **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
   o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
   No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e

@@ -73,6 +73,33 @@ aqui sem ele daria um caminho que responde 404 do lado de fora.
 
 Modelo com `published = 0` não aparece.
 
+## `GET /api/v1/scenes.json` e `GET /api/v1/scenes/*`
+
+Cenas navegáveis a pé (Gaussian Splatting). São duas rotas com a mesma raiz, e a
+extensão as separa.
+
+`scenes.json` devolve o catálogo, no formato do `config.firstPerson3d.scenes` do
+ebgeo_web. `scenes/<id>/<arquivo>` serve a pasta da cena, direto do disco.
+
+**O caminho do catálogo leva `.json` de propósito.** `/api/v1/scenes` sem
+extensão colidiria com o prefixo estático que serve as pastas, e o vencedor
+dependeria da ordem de registro dos plugins.
+
+O catálogo publica UM `basePath`, e o cliente deriva dele os sete endereços da
+cena. São sete chances de errar um, e o erro não seria barulhento: o splat
+carrega, o `voxel-meta.json` volta 404, e a cena abre bonita com a colisão
+desligada.
+
+**`Accept-Ranges` fica ligado**, e não é detalhe: o visualizador lê o
+`voxel.bin` em faixa, e sem isso baixaria o octree inteiro para ler o cabeçalho.
+Um `Range` tem de devolver **206**.
+
+`Cache-Control: public, max-age=3600`. Uma hora, e não `immutable`: a URL da
+cena não carrega token de geração, então reimportá-la troca os bytes sem trocar
+o endereço.
+
+---
+
 ## `GET /api/v1/assets/*`
 
 Miniatura e vídeo de prévia dos modelos, servidos como arquivo de

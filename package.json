@@ -20,7 +20,8 @@
     "bench:cliente": "node bench/cliente.js",
     "importar:glb": "node --env-file-if-exists=.env scripts/importar-glb.js",
     "metadados": "node --env-file-if-exists=.env scripts/metadados.js",
-    "remedir": "node --env-file-if-exists=.env scripts/remedir.js"
+    "remedir": "node --env-file-if-exists=.env scripts/remedir.js",
+    "importar:cena": "node --env-file-if-exists=.env scripts/importar-cena.js"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",

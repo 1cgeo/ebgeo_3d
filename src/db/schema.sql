@@ -120,3 +120,55 @@ CREATE TABLE IF NOT EXISTS imports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_imports_model ON imports(model_id, started_at);
+
+
+-- ============================================================
+-- scenes — cenas navegaveis a pe (Gaussian Splatting).
+--
+-- O DADO DELAS NAO ENTRA EM SQLITE, e isso e deliberado. Uma cena e uma PASTA
+-- que a pipeline produz de uma vez: o splat (`cena.sog`, dezenas de MB), o
+-- octree de colisao, as fichas curadas e as fotos delas. O visualizador pede
+-- esses arquivos por URL, um a um, e alguns em faixa. Enfia-los num BLOB
+-- obrigaria o servico a reconstruir o que o sistema de arquivos ja faz melhor,
+-- sem comprar nada: nao ha milhares de objetos pequenos aqui, que e o problema
+-- que o .3dtiles resolve.
+--
+-- Aqui fica so o METADADO, que e o que o catalogo do EBGeo precisa e o que o
+-- config do frontend deixa de carregar.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS scenes (
+    -- Slug estavel, e o nome da PASTA em data/scenes/.
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+
+    -- ===== catalogo =====
+    description     TEXT,
+    local           TEXT,
+    captured_at     TEXT,
+    keywords        TEXT,            -- JSON array serializado
+
+    -- Onde o pino cai no mapa 2D. E o que o usuario clica para entrar.
+    lon             REAL,
+    lat             REAL,
+
+    -- ===== como o visitante entra =====
+    -- Pose inicial MEDIDA no octree: por o visitante dentro do chao ou
+    -- flutuando e o custo de mexer nisto sem remedir.
+    pose_x          REAL,
+    pose_y          REAL,
+    pose_z          REAL,
+    pose_yaw        REAL,
+    pose_pitch      REAL,
+
+    -- m/s. O padrao do motor de caminhada e 7 m/s, uma corrida de 25 km/h que
+    -- passa reto pelas vitrines.
+    velocidade      REAL,
+    fov             REAL,
+
+    -- ===== proveniencia =====
+    bytes           INTEGER,
+    file_count      INTEGER,
+    imported_at     TEXT,
+
+    published       INTEGER NOT NULL DEFAULT 1
+);

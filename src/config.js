@@ -30,6 +30,18 @@ const config = {
     return resolve(this.dataDir, 'assets');
   },
 
+  /**
+   * Cenas navegaveis a pe, uma PASTA por cena.
+   *
+   * Elas nao entram em SQLite: o splat passa de 20 MB, o visualizador pede os
+   * arquivos um a um, e alguns em faixa. O sistema de arquivos ja faz isso
+   * melhor que um BLOB, e aqui nao ha os milhares de objetos pequenos que o
+   * `.3dtiles` existe para resolver.
+   */
+  get scenesDir() {
+    return resolve(this.dataDir, 'scenes');
+  },
+
   logLevel: process.env.LOG_LEVEL || 'info',
   corsOrigin: process.env.CORS_ORIGIN || '*',
 
