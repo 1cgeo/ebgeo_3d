@@ -64,7 +64,14 @@ npm run cleanup-wal
 npm test           # 21 testes (node:test)
 npm run lint
 npm run knip       # codigo morto e dependencia nao usada
+
+npm run bench      # bancada da camada SQLite (com --expose-gc)
+npm run bench:http # bancada de carga pela porta HTTP
 ```
+
+O serviço **não** serve o diretório `assets/`. Miniatura e vídeo de prévia saem
+por outro caminho, e os campos `preview_thumb` e `preview_video` guardam a URL
+pronta.
 
 ## Estrutura
 
@@ -98,9 +105,15 @@ scripts/
     └── tileset.js       # reescrita do tileset.json
 
 docs/
-├── formato.md    # o padrao e a medida de cada escolha
-├── operacao.md   # runbook da importacao
-└── api.md        # contrato das rotas
+├── formato.md     # o padrao e a medida de cada escolha
+├── operacao.md    # runbook da importacao
+├── api.md         # contrato das rotas
+└── desempenho.md  # as bancadas, o que ja mediram, e o que medir agora
+
+bench/
+├── http.js       # carga pela porta HTTP, com percentis
+├── banco.js      # camada SQLite isolada, pragmas em A/B
+└── lib/          # alvos (travessia do tileset) e gerador de carga
 ```
 
 ## Dependências nativas

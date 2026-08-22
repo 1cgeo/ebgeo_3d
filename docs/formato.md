@@ -179,6 +179,18 @@ O formato do arquivo é o `.3dtiles` do `3d-tiles-tools` do Cesium, tabela
 `media(key, content)`. Um arquivo escrito aqui abre com
 `npx 3d-tiles-tools convert`, e um deles abre aqui.
 
+**A chave é o caminho relativo dentro do tileset**, com barra normal e sem barra
+inicial: `tileset.json`, `Data/c00.glb`, `Data/d000/tileset.json`. Todo tile entra
+com extensão `.glb`, inclusive os que vieram como `.b3dm`, casando com a URI que
+a reescrita publicou.
+
+A segunda tabela, `meta(key, value)`, é o cabeçalho do próprio modelo: `id`,
+`name`, `tilesVersion`, `geometry`, `texture`, `textureQuality`, `buildToken`,
+`builtAt`, `sourcePath`, `ktx`, `tileCount`, `jsonCount`, `sourceBytes`,
+`published`, `lon`, `lat` e `height`. É dela que o `--promover` reconstrói o
+catálogo sem reconverter nada, e é ela que faz um `.3dtiles` copiado solto para
+outra máquina continuar dizendo o que é.
+
 ## `page_size` 4096, e não 65536
 
 O `ebgeo_360` usa `page_size = 65536` e está certo lá: o BLOB dele é uma foto de
@@ -211,7 +223,15 @@ Total: 96,8 GiB passam a cerca de 104 GiB, mais 8%.
   `EXT_structural_metadata`, que ninguém consome hoje. A importação **conta** os
   tiles cuja batch table tinha conteúdo e avisa, em vez de jogar fora calado.
 - **`asset.gltfUpAxis`.** Nunca existiu no esquema de 1.1, e o glTF já é Y-up por
-  definição.
+  definição. Confira o valor na origem antes de converter: se o modelo aparecer
+  deitado ou girado depois, a causa é essa declaração.
+- **Até 3 pixels de borda da textura.** O ETC1S trabalha em blocos de 4x4, e a
+  conversão corta para o múltiplo de 4 abaixo. A borda cortada é a que a UV do
+  tile já não usa.
+- **O canal alfa da textura.** A conversão chama `removeAlpha`, porque textura de
+  fotogrametria é opaca e um alfa constante empurraria o Basis para o modo de
+  duas camadas, mais caro. Modelo que dependa de transparência na textura não
+  passa por este roteiro sem perda.
 
 ## O que fica de fora, e por quê
 

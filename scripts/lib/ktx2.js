@@ -29,7 +29,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import sharp from 'sharp';
@@ -108,10 +108,23 @@ export async function paraKTX2(imagem, { tmp, seq, qlevel = QLEVEL_PADRAO }) {
       '--generate-mipmap',
       png, ktx,
     ]);
+    return readFileSync(ktx);
   } catch {
     return null;
+  } finally {
+    // OS DOIS SAEM AQUI, e nao no fim da corrida. O diretorio temporario so e
+    // apagado quando o worker termina (fecharTemporario), entao sem este bloco
+    // um modelo de 247.125 tiles deixa esse tanto de PNG sem compressao no disco
+    // de SISTEMA, que costuma ser o menor da maquina. O `finally` cobre tambem o
+    // caminho de erro, onde o PNG ja existe e o KTX2 talvez nao.
+    apaga(png);
+    apaga(ktx);
   }
-  return readFileSync(ktx);
+}
+
+/** Apaga sem reclamar de arquivo que nao chegou a existir. */
+function apaga(caminho) {
+  try { unlinkSync(caminho); } catch { /* nao existe: nada a fazer */ }
 }
 
 /**

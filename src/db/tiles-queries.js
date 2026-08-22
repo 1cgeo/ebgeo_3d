@@ -70,10 +70,29 @@ function modelStmts(dbFilename) {
     return cache;
   }
 
-  // Arquivo trocado: solta o antigo dos dois lados antes de reabrir.
+  // SO E ROTACAO SE JA HAVIA CACHE. Sem esta guarda, a PRIMEIRA leitura de todo
+  // modelo caia aqui (cache vazio) e marcava o arquivo como rotacionado, e a
+  // partir dai a conexao passava a ser deste modulo em vez do LRU de
+  // connection.js. O efeito era o LRU nunca receber nada: com o teto de 12
+  // modelos, o /health mostrava `open: 0` depois de vinte mil requisicoes, e a
+  // memoria que o teto existe para limitar ficava sem limite nenhum. Foi a
+  // bancada de carga que mostrou o zero.
+  //
+  // Rotacao de verdade e outra coisa: o arquivo MUDOU debaixo de uma conexao
+  // viva, e ai a conexao tem de ser nossa, porque o LRU e privado e nao tem como
+  // devolver uma conexao nova para o mesmo nome.
+  // Duas causas diferentes chegam ate aqui, e so UMA e rotacao:
+  //   - o arquivo MUDOU debaixo de uma conexao viva  -> rotacao
+  //   - o LRU de connection.js fechou a conexao      -> so reabrir pelo LRU
+  // Confundir as duas tira o modelo do LRU para sempre na primeira vez que ele
+  // for despejado, e o teto de memoria volta a nao valer.
+  const trocouArquivo = Boolean(cache) && cache.db.open
+    && (cache.mtimeMs !== info.mtimeMs || cache.size !== info.size);
   descartar(dbFilename);
-  closeModelDb(dbFilename);
-  _rotacionados.add(dbFilename);
+  if (trocouArquivo) {
+    closeModelDb(dbFilename);
+    _rotacionados.add(dbFilename);
+  }
 
   const aberta = abrirConexao(dbFilename, caminho);
   if (!aberta) return null;

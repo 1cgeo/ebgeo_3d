@@ -7,14 +7,16 @@
   "scripts": {
     "start": "node --env-file=.env src/server.js",
     "dev": "node --env-file=.env --watch src/server.js",
-    "importar": "node scripts/importar.js",
-    "verificar": "node scripts/verificar.js",
-    "catalogo": "node scripts/catalogo.js",
-    "cleanup-wal": "node scripts/cleanup-wal.js",
+    "importar": "node --env-file-if-exists=.env scripts/importar.js",
+    "verificar": "node --env-file-if-exists=.env scripts/verificar.js",
+    "catalogo": "node --env-file-if-exists=.env scripts/catalogo.js",
+    "cleanup-wal": "node --env-file-if-exists=.env scripts/cleanup-wal.js",
     "test": "node --test tests/*.test.js",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
-    "knip": "knip"
+    "knip": "knip",
+    "bench": "node --expose-gc bench/banco.js",
+    "bench:http": "node bench/http.js"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",

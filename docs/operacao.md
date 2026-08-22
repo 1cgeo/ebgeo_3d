@@ -18,6 +18,19 @@ KTX_BIN=C:/Program Files/KTX-Software/bin/ktx.exe
 # Linux e o container: ja esta no PATH (pacote ktx-tools)
 ```
 
+Use os atalhos do npm, que leem o `.env`:
+
+```bash
+npm run importar -- --origem <dir> --id <slug>
+```
+
+O `--` antes das opções é obrigatório: sem ele o npm engole os nomes e o roteiro
+recebe só os valores. Chamando `node scripts/importar.js` direto, o `.env` **não**
+é lido, e a variável tem de vir do ambiente da sessão.
+
+O `--dry-run` não precisa do `ktx`: a conferência do binário roda depois do
+inventário, para o reconhecimento funcionar em máquina sem nada instalado.
+
 ## Onde rodar: ler do externo, escrever no interno
 
 Medido com doze workers, mesma amostra:
@@ -53,11 +66,24 @@ Uma importação com `--limite` entra no catálogo com `published = 0` e respond
 404 nas rotas públicas. Isso é de propósito: modelo parcial não vai ao ar por
 esquecimento.
 
+O `--id` aceita só minúsculas, dígitos, hífen e sublinhado, e tem de começar por
+letra ou dígito. Ele é o slug da URL e o nome do arquivo, então escolha-o antes:
+mudá-lo depois obriga a reimportar. O nome de pasta do acervo (`Ponte_Quatis`) é
+recusado.
+
+Sem `--workers`, a importação usa o número de núcleos menos dois, com teto de
+doze. O `--qlevel` sobrepõe a qualidade padrão 200 do ETC1S e fica gravado no
+catálogo, então só o mude com medida na mão.
+
+**Reserve espaço em três lugares:** no destino cabem o modelo novo e o antigo ao
+mesmo tempo, porque os dois convivem até a troca; e cada worker grava um PNG sem
+compressão por textura no `%TEMP%` (`TMPDIR` no Linux), apagando-o em seguida.
+
 ### Os sete passos, e o que cada um confere
 
 | passo | o que faz | o que reprova |
 |---|---|---|
-| 1 | inventário da origem | sem tile, sem `tileset.json` na raiz, container que não é b3dm nem glb |
+| 1 | inventário da origem | sem tile, sem `tileset.json` na raiz, `.pnts`, `.i3dm` ou `.cmpt` na árvore |
 | 2 | abre o banco com nome `.parcial` | - |
 | 3 | converte com N workers, gravando direto no banco | qualquer tile que estourou |
 | 4 | reescreve os `tileset.json` | JSON inválido |
@@ -133,6 +159,65 @@ próprio `.parcial`, troca o arquivo e escreve o catálogo. Ele recusa um
 `.parcial` cujo cabeçalho esteja incompleto, ou cuja contagem de tiles não bata
 com o que o arquivo tem.
 
+### Códigos de saída
+
+Para a fila dos 115 modelos distinguir reprovação de problema de arquivo:
+
+| código | `importar.js` |
+|---|---|
+| 0 | importou |
+| 2 | uso errado, `--id` inválido, origem inexistente |
+| 3 | modelo já no catálogo, e sem `--forcar` |
+| 4 | sem tile, sem `tileset.json` na raiz, ou contêiner recusado |
+| 5 | conversão com erro, JSON inválido, ou conferência reprovada |
+| 6 | troca do arquivo bloqueada: use `--promover` |
+| 7 | cabeçalho do `.parcial` incompleto |
+
+O `verificar.js` sai com 0 (aprovado), 1 (reprovado), 2 (uso) ou 3 (modelo ou
+arquivo ausente).
+
+### O que uma corrida interrompida deixa
+
+Uma reprovação nos passos 3, 4 ou 5 deixa `data/models/<slug>.3dtiles.parcial` no
+disco, do tamanho do modelo. Ele só é apagado na próxima corrida do mesmo `--id`.
+Um `Ctrl+C` deixa, além disso, a linha de `imports` em `rodando` para sempre,
+porque só o fecho normal a atualiza.
+
+## Conferir antes de publicar
+
+```bash
+node scripts/verificar.js --id <slug> --origem <dir>
+```
+
+Ele abre o arquivo publicado do jeito que o serviço abre, e reprova por
+`asset.version` errado, `gltfUpAxis` sobrevivente, URI quebrada, URI sem token,
+tile que não abre como glTF, malha sem Draco e imagem sem KTX2. Sai com código 1
+se reprovar em qualquer ponto, então cabe num laço.
+
+## Remover um modelo
+
+Não há comando. Com o serviço parado:
+
+```sql
+-- data/index.db
+DELETE FROM models WHERE id = 'piloto';
+DELETE FROM imports WHERE model_id = 'piloto';
+```
+
+E apague `data/models/piloto.3dtiles`. Vale sobretudo para os pilotos de
+`--limite`, que ficam no catálogo despublicados.
+
+## O que a importação deixa nulo
+
+Ela preenche só o que consegue medir. Ficam nulos e entram por `UPDATE` no
+`index.db`: `description`, `local`, `keywords`, `max_sse`, `height_offset`,
+`captured_at`, `preview_video` e `preview_thumb`. O `upsert` da reimportação
+preserva o que você editou, então a edição não se perde.
+
+O `locate.height` do catálogo é a altura média do modelo mais 500 m, que é a
+distância de câmera para o modelo caber na tela. Modelo cujo tileset publica só
+`boundingVolume.box` não tem ponto de navegação, e a importação avisa.
+
 ## Publicar e despublicar
 
 ```sql
@@ -185,9 +270,10 @@ abrir o modelo no EBGeo e olhar. O que checar:
 | sintoma | causa provável |
 |---|---|
 | `binario 'ktx' nao responde` | KTX-Software ausente ou `KTX_BIN` errado |
-| razão de tamanho perto de 1,4 e nenhuma textura contada | o `sharp` não decodificou a origem; veja o formato da textura de entrada |
+| razão alta com `ATENCAO: N texturas o codificador recusou` | o binário `ktx` rejeitou as texturas, em geral por versão anterior à 4.4. Falha do `sharp` não produz este sintoma: ela derruba a corrida no passo 3 |
 | `referencias quebradas` no passo 5 sem `--limite` | um `tileset.json` aponta arquivo que não existe na origem |
-| `container "pnts" nao e convertido` | o modelo tem nuvem de pontos; ele não passa por este roteiro |
+| `nao converte` no passo 1 | a árvore tem `.pnts`, `.i3dm` ou `.cmpt`; eles pedem outro pipeline |
+| `nenhum worker respondeu em 60 s` | o worker não carregou, quase sempre `sharp` ou `draco3dgltf` sem binário para esta versão de Node; rode `npm test` para isolar |
 | globo liso, modelo não aparece | URL errada no `config.js`, ou modelo com `published = 0` |
 | modelo aparece branco | KTX2 sem transcodificador no cliente, ou CesiumJS anterior a 1.83 |
 | `EBUSY` ou `EPERM` ao substituir o `.3dtiles` | serviço no ar segurando o arquivo, no Windows. Pare o serviço e use `--promover` |
@@ -195,7 +281,9 @@ abrir o modelo no EBGeo e olhar. O que checar:
 ## Manutenção
 
 ```bash
-npm run cleanup-wal    # tira os bancos do WAL, para publicar em volume :ro
+# So para .3dtiles vindos de fora: a importacao ja fecha todo modelo em
+# journal_mode = delete. Rode com o servico parado, porque ele abre para escrita.
+npm run cleanup-wal
 npm test               # 21 testes
 npm run lint
 ```

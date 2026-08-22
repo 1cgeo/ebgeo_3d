@@ -44,6 +44,7 @@ parentPort.on('message', async (msg) => {
       falhasTextura: r.falhas,
       triangulos: r.triangulos,
       batchTableDescartada: r.batchTableDescartada,
+      gerador: r.gerador,
       glb: ab,
     }, [ab]);
   } catch (err) {

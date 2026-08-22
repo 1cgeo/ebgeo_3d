@@ -52,6 +52,16 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const EXT_TILE = new Set(['.b3dm', '.glb']);
 /** Extensoes que entram no banco como estao. */
 const EXT_COPIA = new Set(['.json', '.bin', '.ktx2', '.jpg', '.jpeg', '.png', '.webp', '.subtree']);
+/**
+ * Conteudo de 3D Tiles que este roteiro NAO converte.
+ *
+ * Eles precisam de nome proprio porque, sem isso, caiam em `ignorados` e
+ * sumiam calados: o modelo entrava sem eles, e a reprovacao so vinha no passo 5
+ * como "referencia quebrada", que a tabela de sintomas atribui a outra causa.
+ * Nuvem de pontos e instanciacao pedem outro pipeline, e a hora de dizer isso e
+ * no passo 1.
+ */
+const EXT_RECUSADA = new Set(['.pnts', '.i3dm', '.cmpt']);
 
 /** Quantos tiles se acumulam antes de uma transacao de escrita. */
 const LOTE_ESCRITA = 256;
@@ -82,10 +92,10 @@ function args() {
 /**
  * Percorre a arvore e separa o que e tile, o que se copia e o que se ignora.
  * @param {string} raiz
- * @returns {{tiles:string[], copias:string[], ignorados:string[], bytes:number}}
+ * @returns {{tiles:string[], copias:string[], ignorados:string[], recusados:string[], bytes:number}}
  */
 function inventaria(raiz) {
-  const tiles = []; const copias = []; const ignorados = [];
+  const tiles = []; const copias = []; const ignorados = []; const recusados = [];
   let bytes = 0;
   (function anda(dir) {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -96,10 +106,11 @@ function inventaria(raiz) {
       bytes += statSync(p).size;
       if (EXT_TILE.has(ext)) tiles.push(rel);
       else if (EXT_COPIA.has(ext)) copias.push(rel);
+      else if (EXT_RECUSADA.has(ext)) recusados.push(rel);
       else ignorados.push(rel);
     }
   })(raiz);
-  return { tiles: tiles.sort(), copias: copias.sort(), ignorados, bytes };
+  return { tiles: tiles.sort(), copias: copias.sort(), ignorados, recusados, bytes };
 }
 
 // ---------------------------------------------------------------- conversao
@@ -128,6 +139,7 @@ function converteTiles(ctx) {
     let bytesEntrada = 0; let bytesSaida = 0;
     let texturas = 0; let falhasTextura = 0; let triangulos = 0;
     let batchDescartadas = 0;
+    const geradores = new Map();
     const erros = [];
     const pendentes = [];
     const vivos = new Set();
@@ -172,6 +184,7 @@ function converteTiles(ctx) {
           falhasTextura += m.falhasTextura;
           triangulos += m.triangulos;
           if (m.batchTableDescartada) batchDescartadas++;
+          if (m.gerador) geradores.set(m.gerador, (geradores.get(m.gerador) || 0) + 1);
         } else {
           erros.push(`${m.chave}: ${m.erro}`);
         }
@@ -203,6 +216,11 @@ function converteTiles(ctx) {
             falhasTextura,
             triangulos,
             batchDescartadas,
+            // O MAIS FREQUENTE, e nao o primeiro: um modelo combinado por
+            // `py3dtiles merge` pode ter partes de motores diferentes, e o que
+            // descreve o conjunto e a maioria.
+            gerador: [...geradores.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null,
+            geradores: Object.fromEntries(geradores),
             erros,
             segundos,
           });
@@ -244,11 +262,6 @@ async function main() {
   const log = (s) => console.log(s);
   const passo = (t) => console.log(`\n--- ${t} ---`);
 
-  // O `ktx` se confere ANTES de qualquer trabalho. Sem esta linha, um binario
-  // ausente viraria "textura pulada" em cada um dos milhares de tiles, e a
-  // corrida terminaria com o modelo inteiro sem compressao de textura, sem erro.
-  const ktxVersao = await versaoKtx();
-
   const dbFilename = `${o.id}.3dtiles`;
   const destino = join(config.modelsDbDir, dbFilename);
   const temporario = `${destino}.parcial`;
@@ -266,10 +279,17 @@ async function main() {
   const inv = inventaria(o.origem);
   const tiles = o.limite ? inv.tiles.slice(0, o.limite) : inv.tiles;
   log(`  ${(inv.tiles.length + inv.copias.length).toLocaleString('pt-BR')} arquivos, ${(inv.bytes / 2 ** 20).toFixed(1)} MiB`);
-  log(`  tiles ${inv.tiles.length.toLocaleString('pt-BR')}   json e afins ${inv.copias.length}   ignorados ${inv.ignorados.length}`);
+  log(`  tiles ${inv.tiles.length.toLocaleString('pt-BR')}   json e afins ${inv.copias.length}   ignorados ${inv.ignorados.length}   recusados ${inv.recusados.length}`);
   if (o.limite) log(`  ATENCAO: --limite ${o.limite}, importacao PARCIAL (nao publique)`);
   if (inv.ignorados.length) {
     log(`  ignorados (nao entram no banco): ${inv.ignorados.slice(0, 5).join(', ')}${inv.ignorados.length > 5 ? ' ...' : ''}`);
+  }
+  if (inv.recusados.length) {
+    console.error(`ERRO: ${inv.recusados.length} arquivos de tipo que este roteiro nao converte.`);
+    for (const r of inv.recusados.slice(0, 5)) console.error(`  ${r}`);
+    console.error('Nuvem de pontos (.pnts), instanciacao (.i3dm) e composto (.cmpt) pedem outro pipeline.');
+    closeAll();
+    process.exit(4);
   }
   if (!tiles.length) {
     console.error('ERRO: nenhum tile na origem.');
@@ -303,6 +323,17 @@ async function main() {
     closeAll();
     return;
   }
+
+  // O `ktx` se confere DEPOIS do inventario e ANTES de escrever qualquer coisa.
+  //
+  // Antes do inventario nao serve: o --dry-run e reconhecimento, nao converte
+  // nada, e exigir o binario ali negava ao operador a unica leitura que ele pode
+  // fazer sem ter instalado coisa alguma.
+  //
+  // Depois da conversao seria tarde: um binario ausente viraria "textura pulada"
+  // em cada um dos milhares de tiles, e a corrida terminaria com o modelo
+  // inteiro sem compressao de textura, sem um erro.
+  const ktxVersao = await versaoKtx();
 
   passo('2. banco de destino');
   if (!existsSync(config.modelsDbDir)) mkdirSync(config.modelsDbDir, { recursive: true });

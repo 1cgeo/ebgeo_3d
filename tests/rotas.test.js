@@ -151,5 +151,10 @@ test('normalizaChave rejeita travessia e aceita caminho comum', () => {
   assert.equal(normalizaChave('../x'), null);
   assert.equal(normalizaChave('a/../b'), null);
   assert.equal(normalizaChave(''), null);
-  assert.equal(normalizaChave('%ZZ'), null);
+  // O POR-CENTO SOLTO PASSA, e este teste ja exigiu o contrario. Enquanto a
+  // funcao decodificava por cima do que o Fastify ja tinha decodificado, "%ZZ"
+  // parecia escape malformado e virava 400. Era o teste travando o defeito: uma
+  // chave de media com por-cento literal ficava inalcancavel.
+  assert.equal(normalizaChave('%ZZ'), '%ZZ');
+  assert.equal(normalizaChave('Data/100%.glb'), 'Data/100%.glb');
 });

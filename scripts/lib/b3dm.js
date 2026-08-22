@@ -74,3 +74,30 @@ export function tipoDeTile(buf) {
   if (magic === 'b3dm' || magic === 'pnts' || magic === 'i3dm' || magic === 'cmpt') return magic;
   return 'desconhecido';
 }
+
+/**
+ * Le `asset.generator` do chunk JSON cru de um glb.
+ *
+ * TEM DE SER AQUI, e nao pelo Document do glTF-Transform: o `readBinary` dele
+ * carimba o proprio nome em `asset.generator` na LEITURA, entao um `getAsset()`
+ * depois devolve "glTF-Transform v4.4.2" para todo modelo do acervo. Medido: o
+ * arquivo diz "Agisoft Metashape" e o Document diz outra coisa.
+ *
+ * Chame uma vez por worker: o gerador e o mesmo no modelo inteiro, e parsear o
+ * JSON de cada um dos milhoes de tiles so para reler a mesma string seria
+ * trabalho jogado fora.
+ *
+ * @param {Buffer} glb
+ * @returns {string|null}
+ */
+export function leGerador(glb) {
+  try {
+    if (glb.toString('ascii', 0, 4) !== 'glTF') return null;
+    const tamanhoChunk = glb.readUInt32LE(12);
+    if (glb.toString('ascii', 16, 20) !== 'JSON') return null;
+    const json = JSON.parse(glb.toString('utf-8', 20, 20 + tamanhoChunk));
+    return (json.asset && json.asset.generator) || null;
+  } catch {
+    return null;
+  }
+}

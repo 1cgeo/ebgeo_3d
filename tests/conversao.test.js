@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { abrirTile, tipoDeTile } from '../scripts/lib/b3dm.js';
+import { abrirTile, tipoDeTile, leGerador } from '../scripts/lib/b3dm.js';
 import { reescreveTileset, pontoDeNavegacao } from '../scripts/lib/tileset.js';
 
 /** Monta um glb minimo valido (so o chunk JSON). */
@@ -135,4 +135,19 @@ test('pontoDeNavegacao cai para boundingVolume.region', () => {
 
 test('pontoDeNavegacao devolve null quando so ha box', () => {
   assert.equal(pontoDeNavegacao({ root: { boundingVolume: { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] } } }), null);
+});
+
+test('leGerador tira o motor do JSON cru', () => {
+  // O glTF-Transform carimba o proprio nome em asset.generator ja na LEITURA,
+  // entao ler pelo Document publica "glTF-Transform" como proveniencia de todo
+  // modelo do acervo. Este e o unico caminho em que o valor de origem sobrevive.
+  const glb = glbFalso({ asset: { version: '2.0', generator: 'Agisoft Metashape' } });
+  assert.equal(leGerador(glb), 'Agisoft Metashape');
+  assert.equal(leGerador(glbFalso({ asset: { version: '2.0', generator: 'DJI Terra' } })), 'DJI Terra');
+});
+
+test('leGerador devolve null em vez de estourar com entrada estranha', () => {
+  assert.equal(leGerador(Buffer.from('nao e glb')), null);
+  assert.equal(leGerador(glbFalso({ asset: { version: '2.0' } })), null);
+  assert.equal(leGerador(Buffer.alloc(0)), null);
 });

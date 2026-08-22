@@ -86,9 +86,15 @@ que custou trabalho.
 - **`page_size = 4096`** no banco de modelo. O 360 usa 65536 e está certo lá,
   porque o BLOB dele é uma foto de megabytes. Aqui o tile médio tem 39,9 KiB e
   64 KB desperdiça 21,9% de disco sem ganho de leitura.
-- **`journal_mode = OFF` na carga, `DELETE` no fecho.** OFF na carga: 0,9 s
-  contra 49,8 s. DELETE no fecho: em WAL o SQLite cria o `-shm` ao abrir, e num
-  volume `:ro` isso derruba o serviço com erro que não aponta a causa.
+- **O lote da transação na carga.** Medido com 8.000 blobs de 40 KiB: lote de 1
+  contra lote de 256 dá **24x**; `synchronous` FULL contra OFF dá 2x;
+  `journal_mode` e `cache_size` não dão nada. O que decide é o `LOTE_ESCRITA` do
+  `importar.js`, não o pragma.
+- **`journal_mode = MEMORY` na carga, e não `OFF`.** O SQLite **recusa** o OFF
+  aqui e devolve `delete` sem reclamar, então pedir OFF dava a impressão de uma
+  otimização que nunca aconteceu. O teste confere o valor efetivo.
+- **`DELETE` no fecho.** Em WAL o SQLite cria o `-shm` ao abrir, e num volume
+  `:ro` isso derruba o serviço com erro que não aponta a causa.
 - **Draco, e não meshopt.** Empatam no Cesium com carga paralela; o meshopt custa
   17% a mais de bytes. Uma medida em série dava meshopt 2,5 vezes mais rápido, e
   era artefato do agendamento por quadro do worker de Draco.
@@ -133,3 +139,12 @@ que custou trabalho.
   raiz dá chave inexistente, e a conferência acusa falso.
 - **`asset.version: "0.0"`** aparece em 7 modelos do acervo (saída do DJI Terra).
   É inválido pelo esquema; a conversão normaliza.
+- **O glTF-Transform sobrescreve `asset.generator` na LEITURA.** Ler a
+  proveniência pelo `Document` devolve "glTF-Transform v4.4.2" para todo modelo.
+  O `leGerador` de `b3dm.js` lê do JSON cru, que é onde o valor sobrevive.
+- **O `.env` só chega pelos atalhos do npm** (`--env-file-if-exists`). Chamando
+  `node scripts/...` direto, `KTX_BIN` tem de vir do ambiente.
+- **Em contêiner, a importação roda no mesmo serviço:**
+  `docker compose run --rm ebgeo3d node scripts/importar.js --origem /origem/<pasta> --id <slug>`.
+  Aponte `EBGEO3D_SOURCE_DIR` no `.env`, senão o compose monta `./origem`, que
+  não existe.

@@ -19,7 +19,7 @@
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, KHRTextureBasisu, KHRDracoMeshCompression } from '@gltf-transform/extensions';
 import draco3d from 'draco3dgltf';
-import { abrirTile } from './b3dm.js';
+import { abrirTile, leGerador } from './b3dm.js';
 import { paraKTX2, abrirTemporario, fecharTemporario, QLEVEL_PADRAO } from './ktx2.js';
 
 /**
@@ -51,10 +51,14 @@ export async function criarConversor() {
 
   const tmp = abrirTemporario();
   let seq = 0;
+  // O gerador e o mesmo no modelo inteiro: le-se do primeiro tile e pronto.
+  let gerador;
 
   return {
     async converte(buf, qlevel = QLEVEL_PADRAO) {
       const envelope = abrirTile(buf);
+      // Antes do readBinary, que sobrescreve o campo. Ver leGerador em b3dm.js.
+      if (gerador === undefined) gerador = leGerador(envelope.glb);
       const doc = await io.readBinary(new Uint8Array(envelope.glb));
 
       const basisu = doc.createExtension(KHRTextureBasisu).setRequired(true);
@@ -92,6 +96,11 @@ export async function criarConversor() {
         falhas,
         triangulos,
         batchTableDescartada: envelope.temBatchTable,
+        // O MOTOR SAI DO ARQUIVO, nunca do nome da pasta. E o campo que diz se o
+        // modelo veio do Metashape ou do DJI Terra, e as duas saidas diferem em
+        // tudo que importa aqui: tamanho de textura, formato dela e triangulos
+        // por tile. Lido do JSON cru, que e o unico lugar onde ele sobrevive.
+        gerador,
       };
     },
     fecha() {

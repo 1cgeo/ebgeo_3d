@@ -128,15 +128,23 @@ export function closeModelDb(dbFilename) {
 /**
  * Cria um banco de modelo para ESCRITA, com os pragmas de carga em lote.
  *
- * `journal_mode = OFF` durante a ingestao, e nao WAL. Medido no Ponte_Quatis
- * (7.501 tiles, 288 MiB): 0,9 s com OFF contra 49,8 s com DELETE ou WAL. Pior
- * que o tempo e o pico de disco: carregar o parque-osorio (3,6 GiB) em WAL
- * produziu um arquivo -wal de 4,5 GB, maior que o proprio dado.
+ * O QUE REALMENTE CUSTA NA CARGA, medido com 8.000 blobs de 40 KiB:
  *
- * O journal volta ao normal no fim da importacao (ver finalizarModelDb), porque
- * `OFF` deixa o banco sem como se recuperar de uma queda no meio de uma escrita.
- * Durante a carga isso e aceitavel: o arquivo esta sendo construido do zero e o
- * conserto de uma queda e apagar e comecar de novo.
+ *   tamanho da transacao   lote de 1 contra lote de 256:  24x
+ *   synchronous            FULL contra OFF:                2x
+ *   journal_mode           MEMORY contra DELETE:      nenhum
+ *   cache_size             2 MB contra 64 MB:         nenhum
+ *
+ * A transacao em lote e o que decide, e ela vive no importar.js (LOTE_ESCRITA).
+ * Aqui sobra o `synchronous = OFF`, que vale 2x e e seguro durante a construcao:
+ * o arquivo nasce do zero e o conserto de uma queda e apagar e recomecar.
+ *
+ * `journal_mode = MEMORY` E NAO `OFF`. O SQLite RECUSA o OFF nesta situacao e
+ * devolve `delete` sem reclamar, entao pedir OFF dava a impressao de uma
+ * otimizacao que nunca aconteceu. O MEMORY e aceito, e o teste confere o valor
+ * EFETIVO em vez do que pedimos.
+ *
+ * O journal volta a DELETE no fim da importacao (ver finalizarModelDb).
  *
  * @param {string} caminho - Caminho absoluto do arquivo a criar
  * @returns {import('better-sqlite3').Database}
@@ -146,7 +154,7 @@ export function createModelDb(caminho) {
   // page_size TEM de vir antes de qualquer tabela: depois disso ele so muda por
   // VACUUM, que reescreve o arquivo inteiro.
   db.pragma('page_size = 4096');
-  db.pragma('journal_mode = OFF');
+  db.pragma('journal_mode = MEMORY');
   db.pragma('synchronous = OFF');
   db.pragma('cache_size = -64000');
   const schema = readFileSync(resolve(__dirname, 'model-schema.sql'), 'utf-8');

@@ -72,13 +72,12 @@ function tipoDe(chave) {
  */
 export function normalizaChave(bruto) {
   if (!bruto) return null;
-  let chave;
-  try {
-    chave = decodeURIComponent(bruto);
-  } catch {
-    return null;                       // percent-encoding malformado
-  }
-  chave = chave.split('?')[0].replace(/\\/g, '/');
+  // SEM decodeURIComponent AQUI. O Fastify ja decodifica o curinga antes de
+  // entregar em `params['*']`, e decodificar de novo quebra a chave que contem um
+  // por-cento literal: "Data/100%.glb" chega ja decodificada, o segundo decode
+  // acha um escape malformado e a rota responde 400 num arquivo que existe.
+  // Medido com app.inject: "100%25.glb" chega como "Data/100%.glb".
+  let chave = String(bruto).split('?')[0].replace(/\\/g, '/');
   if (chave.startsWith('/')) chave = chave.slice(1);
   if (chave === '' || chave.includes('\0')) return null;
   if (chave.split('/').some((p) => p === '..' || p === '.')) return null;
