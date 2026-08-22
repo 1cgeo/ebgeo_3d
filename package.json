@@ -8,7 +8,6 @@
     "start": "node --env-file=.env src/server.js",
     "dev": "node --env-file=.env --watch src/server.js",
     "importar": "node scripts/importar.js",
-    "inventario": "node scripts/inventario.js",
     "verificar": "node scripts/verificar.js",
     "catalogo": "node scripts/catalogo.js",
     "cleanup-wal": "node scripts/cleanup-wal.js",

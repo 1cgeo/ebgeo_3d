@@ -1,0 +1,37 @@
+services:
+  ebgeo3d:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ebgeo-3d
+    ports:
+      - "8082:8082"
+    volumes:
+      # O volume de dados NAO e :ro, e a razao e uma so: a importacao roda neste
+      # mesmo container (`docker compose run --rm ebgeo3d node scripts/importar.js`)
+      # e precisa escrever. O servico em si abre todo banco de modelo com
+      # `readonly: true` e `query_only = true`.
+      #
+      # Se um dia a importacao sair para fora, o volume pode virar :ro. Nesse dia
+      # confira que todo .3dtiles saiu do WAL: em journal_mode=wal o SQLite
+      # precisa criar o -shm ao abrir, e num volume :ro isso derruba o servico
+      # com um erro que nao aponta a causa. O finalizarModelDb ja deixa em
+      # DELETE, e o cleanup-wal confere.
+      - ${EBGEO3D_DATA_DIR:-./data}:/data
+      # A origem dos modelos, so leitura: a importacao le daqui e nunca escreve.
+      - ${EBGEO3D_SOURCE_DIR:-./origem}:/origem:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=8082
+      - EBGEO3D_DATA_DIR=/data
+      - LOG_LEVEL=info
+      - CORS_ORIGIN=*
+      - MAX_OPEN_MODELS=12
+      - MODEL_CACHE_SIZE_KB=-8000
+      - MODEL_MMAP_BYTES=67108864
+      - KTX_BIN=ktx
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M

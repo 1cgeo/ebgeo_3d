@@ -55,7 +55,7 @@ function descartar(dbFilename) {
 /**
  * Devolve os statements do modelo, ou null se o arquivo nao existe.
  * @param {string} dbFilename
- * @returns {{get:object, meta:object, db:object}|null}
+ * @returns {{get:object, db:object}|null}
  */
 function modelStmts(dbFilename) {
   const caminho = join(config.modelsDbDir, dbFilename);
@@ -84,8 +84,6 @@ function modelStmts(dbFilename) {
     mtimeMs: info.mtimeMs,
     size: info.size,
     get: aberta.db.prepare('SELECT content FROM media WHERE key = ?'),
-    meta: aberta.db.prepare('SELECT value FROM meta WHERE key = ?'),
-    contar: aberta.db.prepare('SELECT COUNT(*) AS n FROM media'),
   };
   _stmts.set(dbFilename, entrada);
   return entrada;
@@ -102,26 +100,6 @@ export function getMedia(dbFilename, chave) {
   if (!s) return null;
   const linha = s.get.get(chave);
   return linha ? linha.content : null;
-}
-
-/**
- * Le um campo do cabecalho do modelo.
- * @param {string} dbFilename @param {string} chave @returns {string|null}
- */
-export function getMeta(dbFilename, chave) {
-  const s = modelStmts(dbFilename);
-  if (!s) return null;
-  const linha = s.meta.get(chave);
-  return linha ? linha.value : null;
-}
-
-/**
- * Conta as entradas do modelo. Usado pela conferencia, nao pelo caminho quente.
- * @param {string} dbFilename @returns {number|null}
- */
-export function countMedia(dbFilename) {
-  const s = modelStmts(dbFilename);
-  return s ? s.contar.get().n : null;
 }
 
 /** Fecha o que este modulo abriu. Chamado no encerramento. */

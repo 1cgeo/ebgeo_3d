@@ -37,7 +37,7 @@ import sharp from 'sharp';
 const execFileAsync = promisify(execFile);
 
 /** Caminho do binario `ktx`. Sobreponivel por KTX_BIN. */
-export const KTX_BIN = process.env.KTX_BIN || 'ktx';
+const KTX_BIN = process.env.KTX_BIN || 'ktx';
 
 /** Qualidade padrao do basis-lz. Ver o cabecalho deste modulo. */
 export const QLEVEL_PADRAO = 200;

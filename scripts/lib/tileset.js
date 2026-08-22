@@ -67,16 +67,19 @@ export function reescreveTileset(json, token, { converterB3dm = true } = {}) {
   function trataUri(c) {
     if (!c || typeof c.uri !== 'string') return;
     let uri = c.uri.split('?')[0];
+
+    // URL ABSOLUTA SAI PRIMEIRO, antes da troca de extensao. Um tileset que
+    // referencia outro servidor nao passou por esta conversao: trocar o .b3dm
+    // dele por .glb apontaria para um arquivo que so existe aqui.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(uri) || uri.startsWith('//')) {
+      c.uri = uri;
+      return;
+    }
+
     if (converterB3dm && /\.b3dm$/i.test(uri)) {
       uri = uri.replace(/\.b3dm$/i, '.glb');
       trocadas++;
       mudou = true;
-    }
-    // URL absoluta nao e nossa: um tileset que referencia outro servidor passa
-    // adiante sem token e sem troca de extensao.
-    if (/^[a-z][a-z0-9+.-]*:/i.test(uri) || uri.startsWith('//')) {
-      c.uri = uri;
-      return;
     }
     uris.push(uri);
     if (CONTEUDO.test(uri)) {
@@ -89,17 +92,18 @@ export function reescreveTileset(json, token, { converterB3dm = true } = {}) {
 
   function percorre(tile) {
     if (!tile || typeof tile !== 'object') return;
+
+    // TILING IMPLICITO SAI ANTES DE QUALQUER TROCA. Ele nao lista tile por tile:
+    // os templates de subtree e de conteudo levam {level}/{x}/{y}, e a
+    // substituicao acontece no CLIENTE. Um `?v=` colado no template sairia no
+    // lugar errado da URL montada, e a troca de extensao mentiria sobre um
+    // arquivo que nem foi gerado ainda.
+    // Nenhum modelo do acervo usa implicito hoje; a guarda existe para a
+    // conversao nao adulterar um que use.
+    if (tile.implicitTiling) return;
+
     trataUri(tile.content);
     if (Array.isArray(tile.contents)) tile.contents.forEach(trataUri);
-    if (tile.implicitTiling) {
-      // Tiling implicito nao lista tile por tile: os templates de subtree e de
-      // conteudo levam {level}/{x}/{y}. Eles NAO recebem token aqui porque a
-      // substituicao acontece no cliente, e um `?v=` colado antes do template
-      // sairia no lugar errado da URL montada.
-      // Modelo do acervo nao usa implicito hoje; a guarda existe para a
-      // conversao nao adulterar um que use.
-      return;
-    }
     if (Array.isArray(tile.children)) tile.children.forEach(percorre);
   }
 

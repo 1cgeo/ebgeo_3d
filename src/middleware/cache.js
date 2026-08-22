@@ -11,7 +11,7 @@ import config from '../config.js';
  * @param {string} str
  * @returns {string}
  */
-export function fnv1a(str) {
+function fnv1a(str) {
   let hash = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
     hash ^= str.charCodeAt(i);
