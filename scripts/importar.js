@@ -46,7 +46,9 @@ import { versaoKtx, QLEVEL_PADRAO } from './lib/ktx2.js';
 import {
   reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE, MAX_TEXTURA,
 } from './lib/tileset.js';
-import { tipoDeTile, abrirTile, leGerador } from './lib/b3dm.js';
+import {
+  tipoDeTile, abrirTile, leGerador, extensoesNaoSuportadas,
+} from './lib/b3dm.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -333,16 +335,32 @@ async function main() {
   // O MOTOR TEM DE SAIR AQUI, e nao no fim: o teto de textura entra no
   // workerData, e o worker nasce antes do primeiro tile ser lido. A escala do
   // geometricError pode esperar, porque a reescrita acontece depois.
-  const motorAmostra = (() => {
-    for (const t of tiles.slice(0, 20)) {
-      try {
-        const tile = abrirTile(readFileSync(join(o.origem, t)));
-        const g = tile && tile.glb ? leGerador(tile.glb) : null;
-        if (g) return g;
-      } catch { /* tile ilegivel na amostra: tenta o proximo */ }
-    }
-    return null;
-  })();
+  // A MESMA LEITURA SERVE A DUAS PERGUNTAS: qual o motor, e ha extensao que esta
+  // conversao nao sabe tratar. Ler duas vezes seria desperdicio.
+  let motorAmostra = null;
+  const naoSuportadas = new Set();
+  for (const t of tiles.slice(0, 20)) {
+    try {
+      const tile = abrirTile(readFileSync(join(o.origem, t)));
+      if (!tile || !tile.glb) continue;
+      if (!motorAmostra) motorAmostra = leGerador(tile.glb);
+      for (const e of extensoesNaoSuportadas(tile.glb)) naoSuportadas.add(e);
+    } catch { /* tile ilegivel na amostra: tenta o proximo */ }
+  }
+
+  // RECUSA CEDO. Este roteiro decodifica o documento inteiro para aplicar KTX2 e
+  // Draco, e um modelo de Gaussian splatting nao sobrevive a isso: os atributos
+  // do splat se perdem, e o resultado e um modelo QUE ABRE e aparece errado, o
+  // que e pior que um erro. Converter primeiro e descobrir depois custaria a
+  // reconversao inteira, e a chance de ninguem notar.
+  if (naoSuportadas.size) {
+    console.error(`ERRO: os tiles declaram extensao que esta conversao nao trata:`);
+    for (const e of naoSuportadas) console.error(`  ${e}`);
+    console.error('Um modelo assim precisa de outro caminho: sirva a arvore como esta,');
+    console.error('ou trate o formato antes de trazer para ca.');
+    closeAll();
+    process.exit(4);
+  }
   const maxTextura = o.maxTextura === 'auto'
     ? (MAX_TEXTURA[motorAmostra] || 0)
     : Number(o.maxTextura);

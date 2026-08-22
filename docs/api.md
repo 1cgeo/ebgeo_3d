@@ -86,6 +86,11 @@ A alternativa (guardar o caminho numa coluna) duplica estado: publicar exigiria
 copiar o arquivo E gravar o caminho, e esquecer o segundo passo some com a
 imagem sem erro nenhum.
 
+**O campo `previewThumbnail` sai SEM o `/api/v1`**, como `/assets/ponte-quatis.webp`.
+O consumidor concatena com a base que só ele conhece, do mesmo jeito que faz com
+o `previewThumbnail` do ebgeo_360. Essa base já traz o `/api/v1` em
+desenvolvimento e o prefixo do proxy em produção.
+
 O catálogo só publica o campo quando o arquivo existe. Sem isso todo modelo
 publicaria uma URL, e o card do EBGeo mostraria imagem partida em vez de cair
 para o ícone padrão.

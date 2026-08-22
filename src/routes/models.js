@@ -15,10 +15,14 @@ import { setCatalogCacheHeaders } from '../middleware/cache.js';
 import config from '../config.js';
 
 /**
- * Segmento publico das previas. Fonte unica do caminho: quem mexer aqui move a
- * URL da miniatura e a do video de uma vez.
+ * Segmento das previas, RELATIVO A BASE DA API, e nao ao host.
+ *
+ * Sem o `/api/v1`, exatamente como o `THUMBNAILS_SEGMENT` do ebgeo_360. O
+ * consumidor concatena com a base que so ele conhece, e essa base ja traz o
+ * `/api/v1` em desenvolvimento e o prefixo do proxy em producao. Embutir o
+ * `/api/v1` aqui daria `/api/v1/api/v1/assets/...` no desenvolvimento.
  */
-const ASSETS_SEGMENT = '/api/v1/assets';
+const ASSETS_SEGMENT = '/assets';
 
 /**
  * A previa DERIVA DO SLUG, e nao de uma coluna do catalogo.

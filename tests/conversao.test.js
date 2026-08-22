@@ -5,7 +5,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { abrirTile, tipoDeTile, leGerador } from '../scripts/lib/b3dm.js';
+import {
+  abrirTile, tipoDeTile, leGerador, extensoesNaoSuportadas, EXTENSOES_NAO_SUPORTADAS,
+} from '../scripts/lib/b3dm.js';
 import { dimensaoAlvo } from '../scripts/lib/ktx2.js';
 import {
   reescreveTileset, pontoDeNavegacao, envelopeGeodesico, ESCALA_GE, MAX_TEXTURA,
@@ -334,4 +336,50 @@ test('MAX_TEXTURA vem vazio: o teto NAO se liga sozinho', () => {
   // O teto troca qualidade por tamanho, e a troca aparece de perto. Ligar por
   // padrao seria decidir no lugar do chefe. Ver docs/desempenho.md.
   assert.equal(Object.keys(MAX_TEXTURA).length, 0);
+});
+
+/* ===================================================================== */
+/* extensoesNaoSuportadas: o portao do Gaussian splatting                */
+/* ===================================================================== */
+
+test('acusa o Gaussian splatting, em extensionsUsed e em extensionsRequired', () => {
+  // O DEFEITO QUE ESTE TESTE TRAVA: o dry-run aceitava o `area3_tiles` do
+  // acervo (323 tiles em KHR_gaussian_splatting com SPZ 2.0), porque o
+  // container e glb e o tileset.json existe. A conversao decodifica o
+  // documento inteiro, e os atributos do splat nao sobrevivem: sairia um
+  // modelo QUE ABRE e aparece errado, pior que um erro.
+  const usadas = glbFalso({
+    asset: { version: '2.0' },
+    extensionsUsed: ['KHR_draco_mesh_compression', 'KHR_gaussian_splatting'],
+  });
+  assert.deepEqual(extensoesNaoSuportadas(usadas), ['KHR_gaussian_splatting']);
+
+  // `extensionsRequired` conta tanto quanto `extensionsUsed`: um modelo pode
+  // declarar a compressao so como obrigatoria.
+  const exigidas = glbFalso({
+    asset: { version: '2.0' },
+    extensionsRequired: ['KHR_gaussian_splatting_compression_spz_2'],
+  });
+  assert.deepEqual(extensoesNaoSuportadas(exigidas), ['KHR_gaussian_splatting_compression_spz_2']);
+});
+
+test('nao acusa nada no tile comum do acervo', () => {
+  // Draco e unlit sao o padrao dos 105 modelos de fotogrametria. Um portao que
+  // reprovasse esses reprovaria o acervo inteiro.
+  const comum = glbFalso({
+    asset: { version: '2.0' },
+    extensionsUsed: ['KHR_draco_mesh_compression', 'KHR_materials_unlit', 'EXT_texture_webp'],
+  });
+  assert.deepEqual(extensoesNaoSuportadas(comum), []);
+  assert.deepEqual(extensoesNaoSuportadas(glbFalso()), []);
+});
+
+test('entrada estranha devolve lista vazia, e nao estoura', () => {
+  assert.deepEqual(extensoesNaoSuportadas(Buffer.alloc(4)), []);
+  assert.deepEqual(extensoesNaoSuportadas(Buffer.from('nao e glb')), []);
+});
+
+test('a lista de nao suportadas cobre as duas extensoes do splat', () => {
+  assert.ok(EXTENSOES_NAO_SUPORTADAS.includes('KHR_gaussian_splatting'));
+  assert.ok(EXTENSOES_NAO_SUPORTADAS.includes('KHR_gaussian_splatting_compression_spz_2'));
 });

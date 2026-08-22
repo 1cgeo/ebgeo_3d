@@ -76,6 +76,49 @@ export function tipoDeTile(buf) {
 }
 
 /**
+ * Extensoes que a conversao NAO sabe tratar, e que ela nao pode simplesmente
+ * atravessar.
+ *
+ * O caso real e o Gaussian splatting. O acervo tem um modelo (`area3_tiles`,
+ * 323 tiles) em `KHR_gaussian_splatting` com compressao SPZ 2.0, e o dry-run o
+ * aceitava: o container e glb, o tileset.json existe, nada reprova. So que a
+ * conversao decodifica o documento inteiro para aplicar KTX2 e Draco, e os
+ * atributos do splat (ROTATION, SCALE e os 45 coeficientes de harmonico
+ * esferico) nao sobrevivem a isso. O resultado seria um modelo QUE ABRE e
+ * aparece errado, que e pior que um erro.
+ *
+ * Recusar cedo custa uma leitura. Deixar passar custa uma reconversao inteira,
+ * mais a chance de ninguem notar.
+ */
+export const EXTENSOES_NAO_SUPORTADAS = [
+  'KHR_gaussian_splatting',
+  'KHR_gaussian_splatting_compression_spz_2',
+];
+
+/**
+ * Devolve as extensoes nao suportadas que o glb declara, ou lista vazia.
+ *
+ * Le do JSON CRU, pela mesma razao de `leGerador`: o glTF-Transform normaliza o
+ * documento na leitura, e uma extensao que ele nao registrou some da lista.
+ *
+ * @param {Buffer} glb
+ * @returns {string[]}
+ */
+export function extensoesNaoSuportadas(glb) {
+  try {
+    const nJson = glb.readUInt32LE(12);
+    const json = JSON.parse(glb.toString('utf-8', 20, 20 + nJson));
+    const usadas = new Set([
+      ...(json.extensionsUsed || []),
+      ...(json.extensionsRequired || []),
+    ]);
+    return EXTENSOES_NAO_SUPORTADAS.filter((e) => usadas.has(e));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Le `asset.generator` do chunk JSON cru de um glb.
  *
  * TEM DE SER AQUI, e nao pelo Document do glTF-Transform: o `readBinary` dele

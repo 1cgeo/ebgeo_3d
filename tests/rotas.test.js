@@ -173,7 +173,7 @@ test('a previa DERIVA do slug, e o modelo sem arquivo omite o campo', async () =
   const r = await app.inject({ method: 'GET', url: '/api/v1/models' });
   const { tilesets } = r.json();
   const comPrevia = tilesets.find((t) => t.id === 'teste');
-  assert.equal(comPrevia.previewThumbnail, '/api/v1/assets/teste.webp');
+  assert.equal(comPrevia.previewThumbnail, '/assets/teste.webp');
   // O DEFEITO QUE ESTE TESTE TRAVA: publicar a URL para todo modelo faria o
   // card do catalogo mostrar imagem partida, em vez de cair para o icone
   // padrao. O `existsSync` da rota e o que separa os dois casos.
@@ -183,7 +183,7 @@ test('a previa DERIVA do slug, e o modelo sem arquivo omite o campo', async () =
 test('a previa sai RELATIVA a base publicada', async () => {
   const r = await app.inject({ method: 'GET', url: '/api/v1/models?base=/ebgeo_3d' });
   const t = r.json().tilesets.find((x) => x.id === 'teste');
-  assert.equal(t.previewThumbnail, '/ebgeo_3d/api/v1/assets/teste.webp');
+  assert.equal(t.previewThumbnail, '/ebgeo_3d/assets/teste.webp');
 });
 
 test('a rota de assets entrega o arquivo e barra a travessia', async () => {
