@@ -40,6 +40,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import config from '../src/config.js';
+import { tamanho, tentando, copiaConferida } from './lib/copia.js';
 
 const execFileAsync = promisify(execFile);
 const repo = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -72,75 +73,19 @@ function paraId(pasta) {
  * nao ENOENT. Uma corrida de horas tem de reconhecer isso e PARAR, e nao tratar
  * como pasta vazia e seguir dizendo que nao havia nada a fazer.
  */
-function respondeDisco(caminho) {
-  try { tentando(() => readdirSync(caminho), 2); return true; } catch { return false; }
-}
-
-/**
- * Tamanho de uma arvore, em bytes, TOLERANTE a erro de leitura.
- *
- * DUAS RAZOES PARA A TOLERANCIA, e as duas apareceram na primeira corrida.
- * O HD externo devolve EIO no meio de uma varredura longa, e devolve ENOENT
- * para um arquivo que a listagem ACABOU de citar. Estourar ali derruba o
- * roteiro antes de converter qualquer coisa, por causa de uma conta que so
- * serve para ordenar a fila.
- *
- * O que nao pode ser lido nao entra na conta, e o total sai subestimado. Isso e
- * aceitavel: ele ordena a fila, e nao decide nada.
- */
-function tamanho(raiz) {
-  let bytes = 0;
-  let erros = 0;
-  (function anda(dir) {
-    let entradas;
-    try { entradas = readdirSync(dir, { withFileTypes: true }); } catch { erros++; return; }
-    for (const e of entradas) {
-      const p = join(dir, e.name);
-      try {
-        if (e.isDirectory()) anda(p); else bytes += statSync(p).size;
-      } catch { erros++; }
-    }
-  })(raiz);
-  return { bytes, erros };
-}
-
-/**
- * Copia uma arvore inteira, TENTANDO DE NOVO em cada passo.
- *
- * O HD externo devolve `UNKNOWN` no meio de leitura longa e volta a responder
- * logo depois. Aconteceu duas vezes na corrida do acervo: uma na copia de saida
- * (2,7 GiB) e outra no `scandir` da origem. Sem retentativa, um solucao de um
- * segundo derruba a copia de um modelo de 10 GiB inteira.
- *
- * A espera cresce, e tres tentativas cobrem o solucao. Se o disco caiu de vez,
- * a terceira falha tambem, e a guarda do proximo modelo para a corrida com a
- * mensagem certa.
- */
-function tentando(o_que, quantas = 3) {
-  let ultimo = null;
-  for (let i = 1; i <= quantas; i++) {
-    try { return o_que(); } catch (err) {
-      ultimo = err;
-      if (i < quantas) {
-        const ate = Date.now() + i * 3000;
-        // Espera OCUPADA porque esta funcao e sincrona, e torna-la assincrona
-        // espalharia `await` por toda a copia recursiva. Sao no maximo 9
-        // segundos numa corrida de horas.
-        while (Date.now() < ate) { /* espera */ }
-      }
-    }
-  }
-  throw ultimo;
-}
-
-/** Copia uma arvore inteira. */
-function copiaArvore(de, para) {
-  mkdirSync(para, { recursive: true });
-  for (const e of tentando(() => readdirSync(de, { withFileTypes: true }))) {
-    const origem = join(de, e.name);
-    const alvo = join(para, e.name);
-    if (e.isDirectory()) copiaArvore(origem, alvo);
-    else tentando(() => copyFileSync(origem, alvo));
+function respondeDisco(caminho, tentativas = 2) {
+  try {
+    tentando(() => readdirSync(caminho), tentativas);
+    return true;
+  } catch (err) {
+    // AQUI O `catch` SO PODE SIGNIFICAR DISCO MUDO, e ele ja mentiu uma vez.
+    // Em 2026-08-23 a extracao de `tentando` para `lib/copia.js` esqueceu o
+    // import, e o `ReferenceError` saiu como "o HD nao responde" por tres
+    // rodadas seguidas, com o disco respondendo 115 entradas em 0 ms o tempo
+    // todo. Um `catch` sem filtro transforma defeito de codigo em diagnostico
+    // de hardware, e manda procurar o erro no lugar errado.
+    if (err instanceof ReferenceError || err instanceof TypeError) throw err;
+    return false;
   }
 }
 
@@ -165,8 +110,14 @@ if (!o.origem || !o.destino) {
   console.error('     --origem cai em EBGEO3D_SOURCE_DIR quando omitido.');
   process.exit(2);
 }
-if (!respondeDisco(o.origem)) {
-  console.error(`ERRO: a origem nao responde: ${o.origem}`);
+// A GUARDA DE ENTRADA E A MAIS PACIENTE DAS DUAS. O HD externo cai e volta em
+// janelas de segundos: em 2026-08-23 ele respondeu a um `readdirSync` e recusou
+// o seguinte, disparado segundos depois, duas vezes seguidas. Aqui a espera nao
+// custa nada (a corrida ainda nem comecou), e desistir cedo joga fora uma
+// rodada inteira. Dentro do laco a paciencia continua curta, porque ali uma
+// espera longa segura um modelo ja convertido.
+if (!respondeDisco(o.origem, 5)) {
+  console.error(`ERRO: a origem nao responde depois de 5 tentativas: ${o.origem}`);
   console.error('O HD externo esta conectado?');
   process.exit(2);
 }
@@ -280,8 +231,8 @@ for (const [i, c] of fila.entries()) {
     // 1. traz a origem para o disco do PC
     if (existsSync(trabalho)) rmSync(trabalho, { recursive: true, force: true });
     process.stdout.write('  copiando do HD... ');
-    copiaArvore(c.caminho, trabalho);
-    console.log(`${(tamanho(trabalho).bytes / 2 ** 20).toFixed(0)} MiB`);
+    const copiado = copiaConferida(c.caminho, trabalho);
+    console.log(`${(copiado.bytes / 2 ** 20).toFixed(0)} MiB, ${copiado.arquivos} arquivos (conferidos)`);
 
     // 2. converte
     const roteiro = c.tipo === 'glb' ? 'importar-glb.js' : 'importar.js';
