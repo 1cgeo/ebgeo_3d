@@ -26,6 +26,7 @@ A conversão custa 8% de espaço em disco e cerca de 12,6 h de máquina para o
 acervo inteiro.
 
 Os números e o porquê de cada escolha estão em [docs/formato.md](docs/formato.md).
+Onde a migração do acervo parou está em [docs/acervo.md](docs/acervo.md).
 
 ## Começar
 
@@ -102,12 +103,14 @@ scripts/
     ├── b3dm.js          # envelope do 3D Tiles 1.0
     ├── ktx2.js          # textura para KTX2/ETC1S
     ├── conversor.js     # o tile inteiro
+    ├── copia.js         # copiar do HD externo, e CONFERIR que tudo chegou
     └── tileset.js       # reescrita do tileset.json
 
 docs/
 ├── formato.md     # o padrao e a medida de cada escolha
 ├── operacao.md    # runbook da importacao
 ├── api.md         # contrato das rotas
+├── acervo.md      # onde a migracao parou, e o que falta
 └── desempenho.md  # as bancadas, o que ja mediram, e o que medir agora
 
 bench/
