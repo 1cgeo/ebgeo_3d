@@ -73,7 +73,7 @@ function paraId(pasta) {
  * como pasta vazia e seguir dizendo que nao havia nada a fazer.
  */
 function respondeDisco(caminho) {
-  try { readdirSync(caminho); return true; } catch { return false; }
+  try { tentando(() => readdirSync(caminho), 2); return true; } catch { return false; }
 }
 
 /**
@@ -104,14 +104,43 @@ function tamanho(raiz) {
   return { bytes, erros };
 }
 
+/**
+ * Copia uma arvore inteira, TENTANDO DE NOVO em cada passo.
+ *
+ * O HD externo devolve `UNKNOWN` no meio de leitura longa e volta a responder
+ * logo depois. Aconteceu duas vezes na corrida do acervo: uma na copia de saida
+ * (2,7 GiB) e outra no `scandir` da origem. Sem retentativa, um solucao de um
+ * segundo derruba a copia de um modelo de 10 GiB inteira.
+ *
+ * A espera cresce, e tres tentativas cobrem o solucao. Se o disco caiu de vez,
+ * a terceira falha tambem, e a guarda do proximo modelo para a corrida com a
+ * mensagem certa.
+ */
+function tentando(o_que, quantas = 3) {
+  let ultimo = null;
+  for (let i = 1; i <= quantas; i++) {
+    try { return o_que(); } catch (err) {
+      ultimo = err;
+      if (i < quantas) {
+        const ate = Date.now() + i * 3000;
+        // Espera OCUPADA porque esta funcao e sincrona, e torna-la assincrona
+        // espalharia `await` por toda a copia recursiva. Sao no maximo 9
+        // segundos numa corrida de horas.
+        while (Date.now() < ate) { /* espera */ }
+      }
+    }
+  }
+  throw ultimo;
+}
+
 /** Copia uma arvore inteira. */
 function copiaArvore(de, para) {
   mkdirSync(para, { recursive: true });
-  for (const e of readdirSync(de, { withFileTypes: true })) {
+  for (const e of tentando(() => readdirSync(de, { withFileTypes: true }))) {
     const origem = join(de, e.name);
     const alvo = join(para, e.name);
     if (e.isDirectory()) copiaArvore(origem, alvo);
-    else copyFileSync(origem, alvo);
+    else tentando(() => copyFileSync(origem, alvo));
   }
 }
 
