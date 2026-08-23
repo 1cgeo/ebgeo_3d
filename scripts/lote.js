@@ -184,7 +184,25 @@ for (const e of readdirSync(o.origem, { withFileTypes: true })) {
   try { arquivos = readdirSync(pasta); } catch { continue; }
   const temTileset = arquivos.includes('tileset.json');
   const glbs = arquivos.filter((f) => f.toLowerCase().endsWith('.glb'));
-  if (!temTileset && glbs.length !== 1) continue;
+
+  // MODELO UM NIVEL ABAIXO. O `area_12_havan_lajeado_estrela` guarda a arvore
+  // numa subpasta, e olhar so a raiz o fazia SUMIR: ele nao entrava na fila,
+  // nao aparecia como feito e nao aparecia como falha. Sao 16.817 tiles de
+  // acervo real, e quem achou foi o `cruzar-acervo.js`.
+  //
+  // Uma subpasta com tileset.json e o modelo. Duas ou mais e ambiguo, e ambiguo
+  // nao se adivinha: escolher uma poria metade do acervo sob um id so.
+  let caminhoModelo = pasta;
+  if (!temTileset && glbs.length !== 1) {
+    const comTileset = arquivos.filter((f) => {
+      try {
+        return statSync(join(pasta, f)).isDirectory()
+          && existsSync(join(pasta, f, 'tileset.json'));
+      } catch { return false; }
+    });
+    if (comTileset.length !== 1) continue;
+    caminhoModelo = join(pasta, comTileset[0]);
+  }
   const id = paraId(e.name);
   // O TAMANHO SE MEDE UMA VEZ SO, e fica no estado.
   //
@@ -203,9 +221,10 @@ for (const e of readdirSync(o.origem, { withFileTypes: true })) {
   }
   candidatos.push({
     pasta: e.name,
-    caminho: pasta,
+    caminho: caminhoModelo,
     id,
-    tipo: temTileset ? 'arvore' : 'glb',
+    // O aninhado e ARVORE: o que muda e onde ela comeca, e nao o que ela e.
+    tipo: (temTileset || caminhoModelo !== pasta) ? 'arvore' : 'glb',
     bytes,
   });
 }
