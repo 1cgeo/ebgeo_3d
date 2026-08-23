@@ -262,11 +262,37 @@ for (const [i, c] of fila.entries()) {
     if (!existsSync(publicado)) throw new Error('o .3dtiles nao apareceu em data/models');
     const bytesPublicado = statSync(publicado).size;
     process.stdout.write('  levando para o HD... ');
-    copyFileSync(publicado, alvo);
-    const bytesAlvo = statSync(alvo).size;
-    if (bytesAlvo !== bytesPublicado) {
-      throw new Error(`copia truncada: ${bytesAlvo} de ${bytesPublicado} bytes`);
+
+    // A COPIA TENTA DE NOVO, e a razao apareceu na corrida: o HD externo
+    // devolveu `UNKNOWN` num `copyfile` de 2,7 GiB e voltou a responder logo
+    // depois. Sem retentativa, um solucao de um segundo custa a RECONVERSAO
+    // inteira do modelo, que ali eram 20 minutos ja gastos.
+    //
+    // Tres tentativas, com espera crescente. Se o disco caiu de vez, a guarda
+    // do proximo modelo pega e a corrida para com a mensagem certa.
+    let bytesAlvo = 0;
+    let ultimoErro = null;
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      try {
+        copyFileSync(publicado, alvo);
+        bytesAlvo = statSync(alvo).size;
+        if (bytesAlvo !== bytesPublicado) {
+          throw new Error(`copia truncada: ${bytesAlvo} de ${bytesPublicado} bytes`);
+        }
+        ultimoErro = null;
+        break;
+      } catch (err) {
+        ultimoErro = err;
+        // A copia parcial SAI antes da proxima tentativa: um arquivo pela
+        // metade no destino e pior que nenhum, porque parece pronto.
+        try { if (existsSync(alvo)) unlinkSync(alvo); } catch { /* ja saiu */ }
+        if (tentativa < 3) {
+          process.stdout.write(`(${err.code || 'erro'}, tentativa ${tentativa + 1}) `);
+          await new Promise((r) => { setTimeout(r, tentativa * 5000); });
+        }
+      }
     }
+    if (ultimoErro) throw ultimoErro;
     console.log(`${(bytesAlvo / 2 ** 20).toFixed(0)} MiB conferidos`);
 
     // 4. limpa o PC

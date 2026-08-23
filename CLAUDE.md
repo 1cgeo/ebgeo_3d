@@ -220,6 +220,11 @@ que custou trabalho.
 - **O HD se confere a CADA modelo, e nao so no comeco.** Numa corrida de horas
   ele cai no meio, e seguir depois disso produz falha atras de falha com a causa
   escondida na primeira.
+- **O HD externo devolve `UNKNOWN` numa cópia grande, e volta a responder.** Na
+  corrida do acervo isso aconteceu num `copyfile` de 2,7 GiB, e sem retentativa
+  custou a reconversão inteira do modelo. O `lote.js` tenta três vezes com
+  espera crescente, e apaga a cópia parcial entre elas: arquivo pela metade no
+  destino é pior que nenhum, porque parece pronto.
 - **Windows segura o arquivo.** Reimportar com o serviço no ar falha com `EBUSY`:
   o `closeModelDb` só fecha a conexão do próprio processo, e o serviço é outro.
   No Linux o rename por cima funciona. O roteiro detecta, preserva o `.parcial` e
