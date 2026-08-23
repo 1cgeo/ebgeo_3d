@@ -18,7 +18,7 @@ process.env.EBGEO3D_DATA_DIR = raiz;
 
 const { buildApp } = await import('../src/build-app.js');
 const { upsertModel, upsertScene } = await import('../src/db/queries.js');
-const { closeAll } = await import('../src/db/connection.js');
+const { closeAll, getIndexDb } = await import('../src/db/connection.js');
 const { resetTileStatements } = await import('../src/db/tiles-queries.js');
 const { normalizaChave } = await import('../src/routes/tiles.js');
 
@@ -160,6 +160,41 @@ test('/health responde com a contagem', async () => {
   const j = r.json();
   assert.equal(j.status, 'ok');
   assert.equal(j.models, 1, 'o modelo nao publicado nao entra na contagem');
+  assert.equal(j.missing, undefined, 'sem ausente o campo nem sai');
+});
+
+test('/health acusa DEGRADED quando o arquivo do modelo sumiu', async () => {
+  // O DEFEITO QUE ESTE TESTE TRAVA: o `lote.js` move o `.3dtiles` para o HD
+  // externo e o apaga do PC, e o catalogo fica apontando arquivo que nao esta
+  // mais la. Medido em 2026-08-22: 67 orfaos de 78 registros, com a sonda
+  // respondendo `ok` o tempo todo.
+  upsertModel({
+    id: 'sumido', name: 'Arquivo que nao existe', db_filename: 'nao-existe.3dtiles',
+    source: null, source_version: null, captured_at: null,
+    tiles_version: '1.1', geometry_codec: 'draco', texture_codec: 'ktx2-etc1s',
+    texture_quality: 200, tile_count: 1, json_count: 1, total_bytes: 1,
+    source_bytes: 1, build_token: 'tok', built_at: '2026-08-22T00:00:00Z',
+    lon: null, lat: null, height: null, ground_height: null, min_height: null,
+    height_offset: null, max_sse: null,
+    model_type: '3dtiles', position_lon: null, position_lat: null,
+    rot_heading: null, rot_pitch: null, rot_roll: null, scale: null,
+    description: null, local: null, keywords: null,
+    preview_video: null, preview_thumb: null, published: 1,
+  });
+
+  try {
+    const r = await app.inject({ method: 'GET', url: '/health' });
+    // O SERVICO CONTINUA DE PE: um modelo ausente nao derruba os outros. O que
+    // muda e o status, que separa "nao responde" de "responde menos do que
+    // promete".
+    assert.equal(r.statusCode, 200);
+    const j = r.json();
+    assert.equal(j.status, 'degraded');
+    assert.equal(j.missing.count, 1);
+    assert.deepEqual(j.missing.ids, ['sumido']);
+  } finally {
+    getIndexDb().prepare('DELETE FROM models WHERE id = ?').run('sumido');
+  }
 });
 
 test('o catalogo sai no formato do config.tilesets', async () => {

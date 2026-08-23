@@ -37,6 +37,10 @@ function stmts() {
     porId: db.prepare('SELECT * FROM models WHERE id = ? AND published = 1'),
     porIdQualquer: db.prepare('SELECT * FROM models WHERE id = ?'),
     contar: db.prepare('SELECT COUNT(*) AS n FROM models WHERE published = 1'),
+    // So o par que a sonda precisa. `listar` NAO serve aqui: ela seleciona
+    // colunas nomeadas e `db_filename` nao esta entre elas, entao a sonda
+    // montava `join(dir, undefined)` e devolvia 503.
+    arquivosPublicados: db.prepare('SELECT id, db_filename FROM models WHERE published = 1'),
     somar: db.prepare('SELECT COALESCE(SUM(total_bytes),0) AS b, COALESCE(SUM(tile_count),0) AS t FROM models WHERE published = 1'),
     upsert: db.prepare(`
       INSERT INTO models (
@@ -122,6 +126,15 @@ export function getModel(id) {
 /** @param {string} id @returns {object|undefined} Inclusive nao publicado. */
 export function getModelAny(id) {
   return stmts().porIdQualquer.get(id);
+}
+
+/**
+ * Id e nome de arquivo de cada modelo publicado. Usado pelo /health para
+ * confrontar o catalogo com o disco.
+ * @returns {{id:string, db_filename:string}[]}
+ */
+export function listPublishedFiles() {
+  return stmts().arquivosPublicados.all();
 }
 
 /** @returns {number} Quantidade de modelos publicados. Usado pelo /health. */
