@@ -16,7 +16,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { copiaArvore, copiaConferida, tamanho, divergencia } from '../scripts/lib/copia.js';
+import {
+  copiaArvore, copiaConferida, tamanho, divergencia, comparaComOrigem,
+} from '../scripts/lib/copia.js';
 
 /** Uma arvore com subpasta, como a do Metashape: raiz, `Data/`, tiles dentro. */
 function arvoreDeMentira() {
@@ -82,4 +84,53 @@ test('erro de leitura na origem reprova, mesmo com os numeros batendo', () => {
 test('byte a mais com a mesma contagem de arquivos reprova', () => {
   const motivo = divergencia({ arquivos: 6, bytes: 999 }, { arquivos: 6, bytes: 1000, erros: 0 });
   assert.ok(motivo, 'so a contagem de arquivos foi conferida, os bytes nao');
+});
+
+/**
+ * A regra de tres numeros de `comparaComOrigem`.
+ *
+ * O RISCO QUE ESTES TESTES GUARDAM. A regra existe para nao punir fidelidade: o
+ * conversor copia a PASTA, e a pasta tem tiles que a raiz nao alcanca. Afrouxar
+ * para acomodar isso e perigoso, e o primeiro teste e o que impede a cura de
+ * virar doenca. Produto com tile FALTANDO reprova em qualquer circunstancia.
+ */
+
+test('produto com tile faltando REPROVA, mesmo com a origem tropecando', () => {
+  const v = comparaComOrigem(900, { tiles: 1000, total: 1200, erros: 3 });
+  assert.ok(v.problema, 'a origem tropecar virou desculpa para faltar tile');
+  assert.match(v.problema, /faltam 100/);
+  assert.equal(v.fato, undefined);
+});
+
+test('produto e origem iguais nao dizem nada', () => {
+  assert.deepEqual(comparaComOrigem(1000, { tiles: 1000, total: 1000, erros: 0 }), {});
+  assert.deepEqual(comparaComOrigem(1000, { tiles: 1000, total: 5000, erros: 5 }), {});
+});
+
+test('tile orfao NA ORIGEM vira fato, e nao reprovacao', () => {
+  // O caso real do `14ciaecmb`: 1.942 tiles em tres ramos que nenhum tileset
+  // referencia. O conversor copiou a pasta, e ser fiel nao pode reprovar.
+  const v = comparaComOrigem(10074, { tiles: 8132, total: 10074, erros: 0 });
+  assert.equal(v.problema, undefined, 'reprovou um produto fiel a origem');
+  assert.match(v.fato, /1942 tile/);
+});
+
+test('produto maior com origem ILEGIVEL vira fato, e nao reprovacao', () => {
+  // O caso real do `estrela-merge`: o indice de um ramo esta com 0 byte, e os
+  // 747 tiles dele somem da travessia.
+  const v = comparaComOrigem(152787, { tiles: 152040, total: 246821, erros: 1 });
+  assert.equal(v.problema, undefined);
+  assert.match(v.fato, /747 tile/);
+});
+
+test('produto acima do TOTAL da origem continua REPROVANDO', () => {
+  // Nao ha origem para esses tiles. Isso e defeito, e nenhuma folga o cobre.
+  const v = comparaComOrigem(1300, { tiles: 1000, total: 1200, erros: 0 });
+  assert.ok(v.problema, 'tile sem origem nenhuma passou');
+  assert.match(v.problema, /so tem 1200/);
+});
+
+test('produto acima do total NAO se safa com erro de leitura', () => {
+  const v = comparaComOrigem(1300, { tiles: 1000, total: 1200, erros: 9 });
+  assert.ok(v.fato || v.problema, 'ficou em silencio');
 });

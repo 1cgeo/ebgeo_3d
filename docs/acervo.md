@@ -7,9 +7,18 @@ Medido em 2026-08-23.
 
 ## O número
 
-**110 das 115 pastas da origem estão convertidas**, 86,1 GiB em `.3dtiles`.
+**110 das 115 pastas da origem estão convertidas**, 86,1 GiB e 2.121.932 tiles.
 Todas passaram pela conferência do `verificar-lote.js`, que confronta o produto
 com a origem tile a tile e referência a referência.
+
+A varredura completa da origem rodou em 2026-08-23: **2.236.320 arquivos, 115
+modelos, 112 íntegros** e três com achado. Ela levou 10,8 min, a 3.442 arquivos
+por segundo.
+
+```bash
+npm run varrer                                 # a origem inteira
+node scripts/varrer-origem.js --piloto 3       # mede a taxa antes de escalar
+```
 
 A origem fica na pasta que `EBGEO3D_SOURCE_DIR` aponta, e o destino é o
 argumento `--destino` do lote. As duas vivem no HD externo.
@@ -47,6 +56,13 @@ Cada um perdeu o `tileset.json` de um ramo:
 |---|---|---|
 | `passadeira` | `Data/d033` | 405 |
 | `TanqueDeFerro` | `Data/d102` | 1.175 |
+
+**O `TanqueDeFerro` tem dano maior do que esse, e a varredura o revelou.** Além
+do índice perdido, **288 tiles que os tilesets referenciam não existem no
+disco**, espalhados por 18 dos 22 ramos. As 288 foram conferidas uma a uma, e
+nenhuma é falso positivo. Reconstruir o índice do `d102` não salvaria o modelo,
+porque o dano não está num ramo só. A `passadeira` continua com um defeito
+único.
 
 O `importar.js` para no `JSON invalido` antes de converter, e está certo: sem o
 índice, os tiles do ramo não têm posição nem limiar de LOD.
@@ -101,3 +117,36 @@ de cópia interrompida ou de setor com defeito. Os dois índices que faltam na
 
 A varredura é barata, e vale antes de reprocessar qualquer coisa: um `stat` por
 arquivo diz quantos zeros existem e em que ramos eles se concentram.
+
+## Tiles que ninguém alcança
+
+A varredura de 2026-08-23 achou um segundo padrão, que não é dano e vale
+conhecer: **tile que existe na pasta e que nenhum tileset referencia**.
+
+O `14ciaecmb` tem 1.942 deles, em três ramos inteiros (`d030`, `d031`, `d032`),
+com índice próprio e tudo. O Cesium nunca os carrega, porque não há caminho da
+raiz até eles. O `estrela-merge` tem 94.034, na pasta `estrela0-antigo`.
+
+O conversor copia a PASTA, então o produto sai fiel ao total, e não ao
+alcançável. Isso é correto, e a conferência precisou aprender a diferença: ela
+compara **três** números, e não dois.
+
+| número | o que é |
+|---|---|
+| alcançável | o que a travessia dos tilesets atinge a partir da raiz |
+| total | o que existe na pasta |
+| produto | o que o `.3dtiles` guarda |
+
+Produto abaixo do alcançável é falha de conversão, sempre. Produto entre o
+alcançável e o total é fidelidade à origem, e sai como fato apontando o lixo que
+está lá. Produto acima do total reprova. A regra vive em `lib/copia.js`, com
+teste, porque calar um alarme falso é perigoso e alguém precisa garantir que o
+alarme verdadeiro continua tocando.
+
+## Quando o disco cai no meio
+
+A conferência **para** e diz onde parou, em vez de reprovar tudo o que vem
+depois. Medido em 2026-08-23: o HD caiu perto do fim de uma passagem, e os 11
+modelos seguintes saíram como reprovados com `disk I/O error`, todos intactos.
+Onze alarmes falsos em cascata desmoralizam a conferência inteira, porque ensinam
+a duvidar também dos verdadeiros. O código de saída nesse caso é 3.

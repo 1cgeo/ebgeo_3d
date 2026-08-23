@@ -25,7 +25,8 @@
     "adotar": "node --env-file-if-exists=.env scripts/adotar.js",
     "lote": "node --env-file-if-exists=.env scripts/lote.js",
     "verificar:lote": "node --env-file-if-exists=.env scripts/verificar-lote.js",
-    "cruzar": "node --env-file-if-exists=.env scripts/cruzar-acervo.js"
+    "cruzar": "node --env-file-if-exists=.env scripts/cruzar-acervo.js",
+    "varrer": "node --env-file-if-exists=.env scripts/varrer-origem.js"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",

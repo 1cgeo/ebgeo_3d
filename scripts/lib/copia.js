@@ -132,3 +132,50 @@ export function copiaConferida(de, para, tentativas = 2) {
   }
   throw new Error(`copia do HD nao confere depois de ${tentativas} tentativas: ${ultimo}`);
 }
+
+/**
+ * O produto bate com a origem? Devolve `{ problema, fato }`, os dois opcionais.
+ *
+ * SAO TRES NUMEROS, e nao dois. `origem.tiles` e o que a raiz ALCANCA pela
+ * travessia dos tilesets. `origem.total` e o que existe na pasta. Eles
+ * divergem, e a diferenca nao e defeito do produto.
+ *
+ * Medido em 2026-08-23, no acervo inteiro:
+ *   - `14ciaecmb` tem 1.942 tiles em tres ramos (`d030`, `d031`, `d032`) que
+ *     nenhum tileset referencia. O Cesium nunca os carregaria, e ainda assim
+ *     eles estao la, com indice proprio e tudo.
+ *   - `estrela-merge` tem 94.034 tiles numa pasta orfa, mais 747 que somem da
+ *     travessia porque o indice do ramo deles esta com 0 byte.
+ *
+ * O conversor copia a PASTA, entao o produto fica fiel ao total, e nao ao
+ * alcancavel. Reprovar por isso seria punir fidelidade.
+ *
+ * A regra, em ordem:
+ *   1. produto MENOR que o alcancavel e falha de conversao, sempre;
+ *   2. produto entre o alcancavel e o total e fidelidade a origem, e sai como
+ *      FATO que aponta o lixo na origem;
+ *   3. produto acima do total so se explica pela travessia ter tropecado, e
+ *      sem tropeco e defeito de verdade.
+ */
+export function comparaComOrigem(tilesProduto, origem) {
+  if (origem.tiles === tilesProduto) return {};
+
+  if (tilesProduto < origem.tiles) {
+    return {
+      problema: `origem alcanca ${origem.tiles} tiles e o produto tem ${tilesProduto}:`
+        + ` faltam ${origem.tiles - tilesProduto}`,
+    };
+  }
+
+  const sobra = tilesProduto - origem.tiles;
+  if (origem.total != null && tilesProduto <= origem.total) {
+    return { fato: `${sobra} tile(s) na origem que a raiz dela nao alcanca` };
+  }
+  if (origem.erros > 0) {
+    return {
+      fato: `${origem.erros} tileset(s) ilegivel(is) na origem,`
+        + ` ${sobra} tile(s) que o produto tem e a origem nao alcanca`,
+    };
+  }
+  return { problema: `o produto tem ${tilesProduto} tiles e a origem so tem ${origem.total ?? origem.tiles}` };
+}

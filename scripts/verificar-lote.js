@@ -22,10 +22,11 @@
  *   node scripts/verificar-lote.js --destino ... --relatorio saida.json
  */
 
-import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, dirname, extname, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { envelopeGeodesico } from './lib/tileset.js';
+import { comparaComOrigem } from './lib/copia.js';
 
 function args() {
   const a = process.argv.slice(2);
@@ -57,8 +58,8 @@ function resolveChave(base, uri) {
   return partes.join('/');
 }
 
-/** Conta tiles na arvore de origem, tolerando erro de leitura do HD. */
-function contaOrigem(raiz) {
+/** Conta TUDO que ha na arvore, tolerando erro de leitura do HD. */
+function contaTudo(raiz) {
   let tiles = 0;
   let jsons = 0;
   let erros = 0;
@@ -77,6 +78,64 @@ function contaOrigem(raiz) {
 }
 
 /**
+ * Conta os tiles que o `tileset.json` da raiz ALCANCA, e nao os que estao na
+ * pasta.
+ *
+ * POR QUE A DISTINCAO IMPORTA. O `estrela-merge` carrega uma pasta
+ * `estrela0-antigo` que a raiz nao referencia: 94.034 tiles que ninguem le.
+ * Contando por diretorio, a origem tem 246.821 tiles e o produto 152.787, e a
+ * conferencia reprovava um modelo correto a cada passagem. Falso alarme
+ * permanente e pior que alarme nenhum, porque ensina a ignorar o alarme.
+ *
+ * A travessia segue as uris a partir da raiz. Uri de `.json` e tileset externo,
+ * e entra na recursao; o resto e tile. O `visitados` corta ciclo.
+ *
+ * Quando a raiz nao tem `tileset.json` (o GLB solto), cai na contagem por
+ * diretorio, que ali e a medida certa.
+ */
+function contaAlcancavel(raiz) {
+  const tileset = join(raiz, 'tileset.json');
+  if (!existsSync(tileset)) {
+    const t = contaTudo(raiz);
+    return { ...t, total: t.tiles, orfaos: 0, porArvore: false };
+  }
+
+  const tiles = new Set();
+  const visitados = new Set();
+  let erros = 0;
+  let jsons = 0;
+
+  (function anda(rel) {
+    if (visitados.has(rel)) return;
+    visitados.add(rel);
+    jsons += 1;
+    let j;
+    try { j = JSON.parse(readFileSync(join(raiz, rel), 'utf-8')); } catch { erros += 1; return; }
+    const base = dirname(rel) === '.' ? '' : dirname(rel).split(sep).join('/');
+    (function no(n) {
+      if (!n || typeof n !== 'object') return;
+      const u = n.content?.uri || n.content?.url;
+      if (u) {
+        const chave = resolveChave(base, u);
+        if (chave.toLowerCase().endsWith('.json')) anda(chave.split('/').join(sep));
+        else tiles.add(chave);
+      }
+      for (const c of n.children || []) no(c);
+    })(j.root || {});
+  })('tileset.json');
+
+  const todos = contaTudo(raiz);
+  return {
+    tiles: tiles.size,
+    total: todos.tiles,
+    jsons,
+    erros: erros + todos.erros,
+    orfaos: todos.tiles - tiles.size,
+    porArvore: true,
+  };
+}
+
+/**
  * Confere um `.3dtiles`. Devolve a lista de problemas: vazia significa aprovado.
  */
 function confere(caminho, pastaOrigem) {
@@ -86,7 +145,13 @@ function confere(caminho, pastaOrigem) {
   try {
     db = new Database(caminho, { readonly: true });
   } catch (err) {
-    return { problemas: [`nao abre como SQLite: ${err.message}`], fatos };
+    // ERRO DE DISCO NAO E VEREDITO SOBRE O DADO. Em 2026-08-23 o HD caiu no
+    // meio de uma passagem e os 11 modelos seguintes sairam como reprovados,
+    // todos com `disk I/O error`, todos intactos. Onze alarmes falsos em
+    // cascata desmoralizam a conferencia inteira: quem le passa a duvidar
+    // tambem dos verdadeiros.
+    const disco = /disk I\/O error|EIO|UNKNOWN|ENOENT|EBUSY/i.test(err.message);
+    return { problemas: [`nao abre como SQLite: ${err.message}`], fatos, erroDeDisco: disco };
   }
 
   try {
@@ -213,12 +278,18 @@ function confere(caminho, pastaOrigem) {
 
     // 8. CONTRA A ORIGEM, quando ela responde.
     if (pastaOrigem && existsSync(pastaOrigem)) {
-      const org = contaOrigem(pastaOrigem);
+      const org = contaAlcancavel(pastaOrigem);
       fatos.tilesOrigem = org.tiles;
       if (org.erros) fatos.errosLeituraOrigem = org.erros;
-      if (org.tiles !== tiles) {
-        problemas.push(`origem tem ${org.tiles} tiles e o produto tem ${tiles}`);
-      }
+      // Tile que a raiz nao alcanca nao e do modelo, e nao entra na conta. Ele
+      // sai como FATO, para a pasta orfa aparecer sem virar reprovacao.
+      if (org.orfaos > 0) fatos.tilesForaDaArvore = org.orfaos;
+
+      // A regra que julga esta em `lib/copia.js`, com teste. Ela e assimetrica
+      // porque a contagem da origem e um PISO quando a travessia tropeca.
+      const v = comparaComOrigem(tiles, org);
+      if (v.problema) problemas.push(v.problema);
+      if (v.fato) fatos.origemIncompleta = v.fato;
     }
   } finally {
     db.close();
@@ -266,7 +337,15 @@ for (const arquivo of arquivos) {
     } catch { /* sem cabecalho legivel: a comparacao com a origem fica de fora */ }
   }
 
-  const { problemas, fatos } = confere(caminho, pastaOrigem);
+  const { problemas, fatos, erroDeDisco } = confere(caminho, pastaOrigem);
+  if (erroDeDisco) {
+    console.error(`
+PARADO em ${id}: o disco recusou a leitura (${problemas[0]}).`);
+    console.error('Nada se conclui sobre este modelo nem sobre os seguintes.');
+    console.error(`Conferidos ate aqui: ${relatorio.length}. Rode de novo com o disco de pe.`);
+    process.exitCode = 3;
+    break;
+  }
   const linha = {
     id, bytes, aprovado: problemas.length === 0, problemas, ...fatos,
     origemConferida: Boolean(pastaOrigem),
