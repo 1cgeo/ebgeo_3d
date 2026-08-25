@@ -12,17 +12,26 @@
  * escrito modelo a modelo ao longo de anos. Digitar de novo seria jogar fora
  * trabalho feito, e cada redigitacao e uma chance de errar.
  *
+ * O NOME TAMBEM VEM, e so enquanto o catalogo ainda mostra o slug. Sem `--nome`
+ * na importacao o catalogo grava `name = id`, e e esse valor que o card exibe:
+ * "14ciaecmb" no lugar de "14a Companhia de Engenharia de Combate". Nome que o
+ * operador escolheu na importacao nao se sobrescreve.
+ *
  * O QUE ELE NAO TRAZ: `url`, `heightOffset`, `locate` e
  * `maximumScreenSpaceError`. Os quatro sao MEDIDOS ou derivados pela
  * importacao, e o valor do config e justamente o que esta sendo aposentado. O
  * `heightOffset` do config antigo, em especial, e ajuste no olho de quem nao
  * tinha a medida.
  *
- * CASAMENTO POR ID, e por NOME normalizado quando o id nao bate. Os ids do
- * config de producao seguem outra convencao (`ponte-general-osorio` contra
- * `ponte-quatis`), entao o nome costuma ser a ponte entre os dois. Um casamento
- * ambiguo NAO se aplica: ele vai para a lista de duvidas, para o operador
- * decidir.
+ * TRES CRITERIOS DE CASAMENTO, nesta ordem: ID, PASTA DA URL e NOME
+ * normalizado. Os ids do config de producao seguem outra convencao
+ * (`ponte-general-osorio` contra `ponte-quatis`, `18bimtz` contra `18bi`), e a
+ * pasta e o que os dois lados sempre compartilham, porque o slug do catalogo
+ * nasce dela pela regra do `lote.js`. Um casamento ambiguo NAO se aplica: ele
+ * vai para a lista de duvidas, para o operador decidir.
+ *
+ * NENHUM dos tres dispensa o portao de lugar: par a mais de 5 km e outro
+ * objeto, e vira duvida em vez de gravacao.
  *
  * Uso:
  *   node scripts/metadados.js --de <caminho do config.js>            # dry-run
@@ -32,6 +41,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { getIndexDb, closeAll } from '../src/db/connection.js';
+import { slugDaUrl } from './lib/slug.js';
 
 function args() {
   const a = process.argv.slice(2);
@@ -103,6 +113,7 @@ function leTilesets(caminho) {
     return {
       id: texto1('id'),
       name: texto1('name'),
+      slugDaUrl: slugDaUrl(texto1('url')),
       description: texto1('description'),
       local: texto1('local'),
       data_captura: texto1('data_captura'),
@@ -159,6 +170,30 @@ const modelos = db.prepare(
 console.log(`catalogo: ${modelos.length} modelos\n`);
 
 const porId = new Map(doConfig.map((x) => [x.id, x]));
+
+/**
+ * TERCEIRO CRITERIO DE CASAMENTO: a PASTA da url.
+ *
+ * POR QUE ELE EXISTE, e o caso e medido. O id do config de producao segue outra
+ * convencao que a do acervo (`18bimtz` contra `18bi`, `1DE` contra `1de`,
+ * `VBE_L_PNT_NOVA` contra `vbe_l_pnt_nova`), e o nome nem sempre salva. O que os
+ * dois lados SEMPRE compartilham e a pasta: o slug do catalogo nasce do nome de
+ * pasta pela regra do `lote.js`, e a url do config aponta essa mesma pasta.
+ *
+ * Sem ele, cinco modelos do acervo ficavam sem descricao, local, palavra-chave e
+ * data, e o texto existia no config o tempo todo. Os cinco pares passam pelo
+ * portao de distancia entre 33 e 140 m.
+ *
+ * Ele entra DEPOIS do id e ANTES do nome, e nao dispensa o portao de lugar: duas
+ * pastas homonimas em cidades diferentes continuariam sendo objetos diferentes.
+ */
+const porSlugUrl = new Map();
+for (const x of doConfig) {
+  if (!x.slugDaUrl) continue;
+  // Pasta repetida vira AMBIGUA, e ambigua nao se aplica.
+  porSlugUrl.set(x.slugDaUrl, porSlugUrl.has(x.slugDaUrl) ? null : x);
+}
+
 const porNome = new Map();
 for (const x of doConfig) {
   const k = chaveDeNome(x.name);
@@ -169,6 +204,7 @@ for (const x of doConfig) {
 
 const atualiza = db.prepare(`
   UPDATE models SET
+    name         = COALESCE(?, name),
     description  = COALESCE(?, description),
     local        = COALESCE(?, local),
     keywords     = COALESCE(?, keywords),
@@ -183,6 +219,14 @@ const duvidas = [];
 for (const m of modelos) {
   let fonte = porId.get(m.id) || null;
   let como = 'id';
+  if (!fonte && porSlugUrl.has(m.id)) {
+    fonte = porSlugUrl.get(m.id);
+    como = 'pasta da url';
+    if (fonte === null) {
+      duvidas.push(`${m.id}: mais de uma entrada do config aponta a pasta "${m.id}"`);
+      continue;
+    }
+  }
   if (!fonte) {
     const k = chaveDeNome(m.name);
     if (porNome.has(k)) {
@@ -205,11 +249,18 @@ for (const m of modelos) {
   }
 
   const kw = fonte.keywords ? JSON.stringify(fonte.keywords) : null;
-  const campos = [fonte.description, fonte.local, kw, fonte.data_captura];
+
+  // O NOME SO ENTRA ENQUANTO O CATALOGO AINDA MOSTRA O SLUG. Sem `--nome`, a
+  // importacao grava `name = id`, e e esse valor que o card do catalogo exibe:
+  // "14ciaecmb" no lugar de "14a Companhia de Engenharia de Combate". Um nome
+  // que o operador escolheu na importacao NAO se sobrescreve por texto de
+  // config, pela mesma razao que o `heightOffset` de la nao se copia.
+  const nome = (m.name === m.id && fonte.name) ? fonte.name : null;
+  const campos = [nome, fonte.description, fonte.local, kw, fonte.data_captura];
   if (campos.every((c) => c == null)) { semPar.push(`${m.id} (par ${fonte.id}, mas sem texto)`); continue; }
 
   console.log(`${m.id}  <-  ${fonte.id}  (por ${como})`);
-  for (const [rotulo, valor] of [['descricao', fonte.description], ['local', fonte.local],
+  for (const [rotulo, valor] of [['nome', nome], ['descricao', fonte.description], ['local', fonte.local],
     ['keywords', kw], ['data', fonte.data_captura]]) {
     if (valor) console.log(`    ${rotulo}: ${String(valor).slice(0, 90)}`);
   }

@@ -41,6 +41,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import config from '../src/config.js';
 import { tamanho, tentando, copiaConferida } from './lib/copia.js';
+import { paraSlug } from './lib/slug.js';
 
 const execFileAsync = promisify(execFile);
 const repo = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -61,10 +62,13 @@ function args() {
 
 const o = args();
 
-/** Transforma o nome da pasta num id de catalogo. */
-function paraId(pasta) {
-  return pasta.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-}
+/**
+ * Transforma o nome da pasta num id de catalogo.
+ *
+ * A regra vive em `lib/slug.js` porque o `metadados.js` precisa da MESMA para
+ * reconhecer o modelo pela url do config. Duas copias divergiriam em silencio.
+ */
+const paraId = paraSlug;
 
 /**
  * O HD respondeu?

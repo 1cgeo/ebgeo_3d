@@ -214,6 +214,36 @@ Ela preenche só o que consegue medir. Ficam nulos e entram por `UPDATE` no
 `captured_at`, `preview_video` e `preview_thumb`. O `upsert` da reimportação
 preserva o que você editou, então a edição não se perde.
 
+Sem `--nome`, o `name` nasce igual ao `id`, e é esse valor que o card do
+catálogo exibe: `14ciaecmb` no lugar de "14ª Companhia de Engenharia de
+Combate".
+
+### Trazer o texto do `config.js` de produção
+
+```bash
+npm run metadados -- --de <caminho do config.js>            # dry-run
+npm run metadados -- --de <caminho do config.js> --gravar
+```
+
+Ele traz `name`, `description`, `local`, `keywords` e `captured_at`. **O nome só
+entra enquanto o catálogo ainda mostra o slug**: nome que você escolheu com
+`--nome` não se sobrescreve.
+
+**Três critérios de casamento, nesta ordem: id, PASTA DA URL e nome
+normalizado.** A pasta é o critério que salva, porque o id do config segue outra
+convenção (`18bimtz` contra `18bi`, `1DE` contra `1de`, `VBE_L_PNT_NOVA` contra
+`vbe_l_pnt_nova`) enquanto o slug do catálogo nasce do nome de pasta pela regra
+do `lote.js`. Enquanto o casamento era só por id e por nome, cinco modelos
+ficaram sem texto e o texto existia no config o tempo todo.
+
+A regra de slug vive em `scripts/lib/slug.js`, e o `lote.js` usa a MESMA. Duas
+cópias divergiriam em silêncio, e há teste que reprova a volta da cópia.
+
+**Nenhum dos três critérios dispensa o portão de lugar.** Par a mais de 5 km é
+outro objeto com o mesmo nome, e vira dúvida em vez de gravação: o config de
+produção tem uma "Ponte General Osório" em Manoel Viana e o acervo tem outra em
+Quatis, a 1.100 km.
+
 O `locate.height` do catálogo é a altura do chão mais 500 m, que é a distância de
 câmera para o modelo caber na tela.
 
