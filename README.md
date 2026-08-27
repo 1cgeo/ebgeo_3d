@@ -70,9 +70,13 @@ npm run bench      # bancada da camada SQLite (com --expose-gc)
 npm run bench:http # bancada de carga pela porta HTTP
 ```
 
-O serviço **não** serve o diretório `assets/`. Miniatura e vídeo de prévia saem
-por outro caminho, e os campos `preview_thumb` e `preview_video` guardam a URL
-pronta.
+O serviço serve o diretório `assets/` em `/api/v1/assets/` (`build-app.js`), com
+uma hora de cache e sem `immutable`. A prévia **deriva do slug**: ponha
+`{id}.webp` e `{id}.webm` em `data/assets/` e pronto, nada a gravar no banco. A
+rota só publica o campo quando o arquivo existe, para o card cair no ícone padrão
+em vez de mostrar imagem partida. Os campos `preview_thumb` e `preview_video` são
+override manual, e nascem nulos em toda importação. Ver `routes/models.js` e
+`docs/operacao.md`.
 
 ## Estrutura
 
